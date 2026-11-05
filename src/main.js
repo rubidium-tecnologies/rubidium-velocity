@@ -28,6 +28,18 @@ const DEFAULTS = {
   trailGradient: false,
   trailAdvancedGradient: false,
   trailGradSmooth: true,
+  glowRing: true,           // свечение колец
+  glowRingMode: 0,          // 0 — простое (один контур), 1 — плавный переход
+  glowRingOpacity: 0.16,
+  glowRingSize: 3,          // ширина свечения в толщинах кольца (не шире расстояния между кольцами)
+  glowRingCustom: false,    // свой цвет вместо цвета колец
+  glowRingColor: '#ffffff',
+  glowBall: true,           // свечение шарика
+  glowBallMode: 1,
+  glowBallOpacity: 0.45,
+  glowBallSize: 3,          // радиус свечения в радиусах шарика
+  glowBallCustom: false,    // свой цвет вместо цвета шарика
+  glowBallColor: '#ffffff',
   particles: true,    // анимация разрушения колец (частицы)
   sound: true,        // звук при столкновениях
 };
@@ -265,6 +277,7 @@ function createSim(canvas, opts) {
       g.stops = [...cfg.gradStops].sort((a, b) => a.pos - b.pos).map((x) => ({ pos: x.pos, rgb: hexToRgb(x.color) }));
       g.smooth = cfg.gradSmooth;
     }
+    g.gbRgb = hexToRgb(cfg.glowBallCustom ? cfg.glowBallColor : cfg.ballColor);   // цвет свечения шарика
     // цвета следа: позиция 0 — у шарика, 1 — самый старый конец следа
     if (!cfg.trailGradient) {
       g.tStops = [{ pos: 0, rgb: hexToRgb(cfg.trailColor) }];
@@ -599,19 +612,28 @@ function createSim(canvas, opts) {
     ctx.lineCap = 'butt';
     ctx.globalAlpha = state.alpha;
 
-    // Мягкая подсветка по бокам: не шире расстояния между кольцами (соседние не накладываются),
-    // а когда кольца сближены вплотную — исчезает совсем, и они сливаются в сплошной монолит
-    const gw = g.count < 2 ? lw * 3 : Math.min(lw * 3, g.spacing);
-    if (gw > lw * 1.2) {
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.lineWidth = gw;
-      for (let i = 0; i < rings.length; i++) {
-        const ring = rings[i];
-        if (ring.broken) continue;
-        ctx.beginPath();
-        ctx.arc(0, 0, ring.R, ring.rot + ring.half, ring.rot + TAU - ring.half);
-        ctx.strokeStyle = ring.glow;
-        ctx.stroke();
+    // Свечение колец (настраивается): не шире расстояния между кольцами (соседние не накладываются), а когда кольца сближены
+    // вплотную — исчезает совсем, и они сливаются в сплошной монолит.
+    // Простое — один широкий полупрозрачный контур; плавное — несколько контуров убывающей ширины, их яркость складывается к центру
+    if (cfg.glowRing && cfg.glowRingOpacity > 0) {
+      const want = lw * cfg.glowRingSize;
+      const gw = g.count < 2 ? want : Math.min(want, g.spacing);
+      if (gw > lw * 1.2) {
+        const passes = cfg.glowRingMode === 1 ? (opts.lite ? 4 : 6) : 1;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = state.alpha * (cfg.glowRingOpacity / passes);
+        for (let k = 0; k < passes; k++) {
+          ctx.lineWidth = lw + ((gw - lw) * (passes - k)) / passes;
+          for (let i = 0; i < rings.length; i++) {
+            const ring = rings[i];
+            if (ring.broken) continue;
+            ctx.beginPath();
+            ctx.arc(0, 0, ring.R, ring.rot + ring.half, ring.rot + TAU - ring.half);
+            ctx.strokeStyle = cfg.glowRingCustom ? cfg.glowRingColor : ring.core;
+            ctx.stroke();
+          }
+        }
+        ctx.globalAlpha = state.alpha;
       }
     }
 
@@ -644,22 +666,27 @@ function createSim(canvas, opts) {
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = state.alpha;
     const br = Math.max(cfg.ballRadius, 2.5 / scale);
-    ctx.fillStyle = cfg.ballColor;
-    if (opts.lite) {
-      // shadowBlur на мобильном Canvas очень дорог — вместо него дешёвое «свечение» полупрозрачным кругом
-      ctx.globalAlpha = state.alpha * 0.25;
+    if (cfg.glowBall && cfg.glowBallOpacity > 0) {
+      const gr = br * cfg.glowBallSize, c = g.gbRgb, op = cfg.glowBallOpacity;
+      ctx.globalCompositeOperation = 'lighter';
+      if (cfg.glowBallMode === 1) {                       // плавное: радиальный градиент от центра к прозрачному краю
+        const grad = ctx.createRadialGradient(ball.x, ball.y, 0, ball.x, ball.y, gr);
+        grad.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},${op})`);
+        grad.addColorStop(0.4, `rgba(${c[0]},${c[1]},${c[2]},${op * 0.4})`);
+        grad.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+        ctx.fillStyle = grad;
+      } else {                                            // простое: один полупрозрачный круг
+        ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${op})`;
+      }
       ctx.beginPath();
-      ctx.arc(ball.x, ball.y, br * 1.9, 0, TAU);
+      ctx.arc(ball.x, ball.y, gr, 0, TAU);
       ctx.fill();
-      ctx.globalAlpha = state.alpha;
-    } else {
-      ctx.shadowColor = cfg.ballColor;
-      ctx.shadowBlur = 14 * scale;
+      ctx.globalCompositeOperation = 'source-over';
     }
+    ctx.fillStyle = cfg.ballColor;
     ctx.beginPath();
     ctx.arc(ball.x, ball.y, br, 0, TAU);
     ctx.fill();
-    ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
   }
 
@@ -825,6 +852,7 @@ const FIELDS = [
   { key: 'smoothFlip', label: 'Плавная смена направления', type: 'toggle', visible: (s) => s.spinDir === 2 },
 
   { section: 'Эффекты' },
+  { key: 'glow', label: 'Свечение', hint: 'колец и шарика', type: 'glow' },
   { key: 'particles', label: 'Анимация разрушения колец', type: 'toggle' },
   { key: 'sound', label: 'Звук при столкновениях', type: 'toggle', noRandomAll: true },   // «Рандомизировать всё» звук не трогает
 ];
@@ -849,6 +877,7 @@ const INFO = {
   spinBalance: 'Как скорость вращения распределяется между кольцами.\nВлево — внешние кольца крутятся быстрее внутренних. Вправо — наоборот. По центру — все кольца вращаются одинаково.',
   spinDir: 'В какую сторону вращаются кольца.\n«По часовой» и «Против часовой» — кольца всегда крутятся в одну выбранную сторону. «Чередуется» — направление меняется на противоположное каждый раз, когда шарик разрушает очередное кольцо.',
   smoothFlip: 'Как кольца разворачиваются при смене направления.\nВыключено — мгновенно, резким рывком. Включено — кольца плавно тормозят и разгоняются в обратную сторону. Доступно, когда выбрана сторона «Чередуется».',
+  glow: 'Мягкое свечение вокруг колец и шарика. Вкладки «Кольца» и «Шарик» настраиваются отдельно.\n«Простое» — один полупрозрачный контур, «Плавное» — свечение, мягко тающее к краям. Прозрачность задаёт яркость, размер — насколько далеко свечение расходится. У колец оно не шире расстояния между ними, поэтому у плотно сжатых колец пропадает. По умолчанию цвет берётся у самих колец и шарика, но можно выбрать свой.',
   particles: 'Эффект разрушения колец: в момент пробития кольцо рассыпается на разлетающиеся частицы.\nЕсли выключить, кольцо просто исчезнет — так нагрузка на устройство ниже.',
   sound: 'Звук столкновений: удары шарика и разрушение колец играют ноты гармоничной гаммы.\nКнопка «Рандомизировать всё» этот переключатель не трогает.',
 };
@@ -858,7 +887,7 @@ const INFO = {
 //   spin   — вращающиеся кольца, без шарика    flip   — вращение со сменой направления каждые ~2 с, без шарика
 const SCENES = {
   ballRadius: 'ball', ballColor: 'ball', gravity: 'ball', bounce: 'ball',
-  trail: 'ball', trailOpacity: 'ball', trailLength: 'ball', trailPaint: 'ball',
+  trail: 'ball', trailOpacity: 'ball', trailLength: 'ball', trailPaint: 'ball', glow: 'ball',
   ringCount: 'static', ringSpacing: 'static', lineWidth: 'static', ringPaint: 'static',
   gapSize: 'static', gapBalance: 'static',
   spin: 'spin', spinBalance: 'spin', spinDir: 'spin', smoothFlip: 'flip',
@@ -924,6 +953,13 @@ input.switch:checked::after{transform:translateX(24px)}
 .sl.drag .sl-thumb{background:var(--accent)}
 .sl:focus-visible .sl-thumb{outline:2px solid var(--accent);outline-offset:2px}
 .paint{display:flex;flex-direction:column;gap:12px;padding-top:2px}
+.glow{display:flex;flex-direction:column;gap:10px;padding-top:2px}
+.glow-t{display:flex;flex-direction:column;gap:6px}
+.glow-body{display:flex;flex-direction:column;gap:8px}
+.glow-line{display:flex;align-items:center;gap:10px;min-height:40px;font-size:14px}
+.glow-line label,.glow-line>span{flex:1;min-width:0}
+.glow-sh{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted)}
+.glow-val{font-variant-numeric:tabular-nums;color:var(--text)}
 .seg{position:relative;display:grid;grid-template-columns:repeat(3,1fr);height:44px;border:1px solid var(--line);border-radius:12px;background:var(--bg);
   touch-action:pan-y;cursor:pointer;outline:none;-webkit-user-select:none;user-select:none}
 .seg-thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc((100% - 6px)/3);border-radius:9px;background:var(--accent);transition:transform .18s ease;pointer-events:none}
@@ -1284,6 +1320,19 @@ function randomStops(hue) {
 }
 
 function randomValue(def, hue) {
+  if (def.type === 'glow') {                                  // свечение: все настройки обеих вкладок
+    const o = {};
+    GLOW_T.forEach((t) => {
+      const k = (x) => 'glow' + t.k + x;
+      o[k('')] = Math.random() < 0.75;
+      o[k('Mode')] = Math.random() < 0.5 ? 0 : 1;
+      o[k('Opacity')] = parseFloat((GLOW_OP.min + Math.floor(Math.random() * ((GLOW_OP.max - GLOW_OP.min) / GLOW_OP.step + 1)) * GLOW_OP.step).toFixed(4));
+      o[k('Size')] = parseFloat((t.size.min + Math.floor(Math.random() * ((t.size.max - t.size.min) / t.size.step + 1)) * t.size.step).toFixed(4));
+      o[k('Custom')] = Math.random() < 0.25;
+      o[k('Color')] = hue ? randomHueColor() : randomAnyColor();
+    });
+    return o;
+  }
   if (def.type === 'range') {
     const n = Math.floor((def.max - def.min) / def.step);
     return parseFloat((def.min + Math.floor(Math.random() * (n + 1)) * def.step).toFixed(4));
@@ -1300,6 +1349,11 @@ function randomValue(def, hue) {
 }
 
 function initialValue(def) {
+  if (def.type === 'glow') {
+    const o = {};
+    GLOW_KEYS.forEach((k) => { o[k] = INITIAL[k]; });
+    return o;
+  }
   if (def.type === 'paint') {
     const q = def.p;
     return {
@@ -1554,6 +1608,8 @@ function buildSegment(labels, index, onChange) {
   node.appendChild(thumb);
   const spans = labels.map((t) => node.appendChild(el('span', '', { textContent: t })));
   const n = labels.length;
+  node.style.gridTemplateColumns = `repeat(${n},1fr)`;            // позиций может быть не три (например, две)
+  thumb.style.width = `calc((100% - 6px)/${n})`;
   let idx = index;
   const draw = (pos, animate) => {
     thumb.style.transition = animate ? '' : 'none';
@@ -1599,6 +1655,80 @@ function buildSegment(labels, index, onChange) {
     e.preventDefault();
   });
   return { node, set: (i) => { idx = i; draw(i, true); } };
+}
+
+// ── Свечение: одна карточка, две вкладки («Кольца» / «Шарик»), под каждой — выключатель и настройки ──
+const GLOW_OP = { min: 0.05, max: 1, step: 0.05, fmt: (v) => Math.round(v * 100) + '%' };
+const GLOW_T = [
+  { k: 'Ring', name: 'Кольца', size: { min: 1.5, max: 20, step: 0.5, fmt: (v) => '×' + v.toFixed(1) } },
+  { k: 'Ball', name: 'Шарик', size: { min: 1.2, max: 8, step: 0.1, fmt: (v) => '×' + v.toFixed(1) } },
+];
+const GLOW_KEYS = GLOW_T.flatMap((t) => ['', 'Mode', 'Opacity', 'Size', 'Custom', 'Color'].map((x) => 'glow' + t.k + x));
+
+function buildGlow(def) {
+  const node = el('div', 'glow');
+  let cur = 0;
+  const tabs = buildSegment(GLOW_T.map((t) => t.name), 0, (i) => { cur = i; show(); });
+  node.appendChild(tabs.node);
+
+  const ui = GLOW_T.map((t) => {
+    const key = (x) => 'glow' + t.k + x;
+    const box = el('div', 'glow-t');
+
+    const onId = 'f-glow-on-' + t.k;
+    const onLine = el('div', 'glow-line');
+    const onSw = el('input', 'switch', { id: onId, type: 'checkbox' });
+    onLine.append(el('label', '', { htmlFor: onId, textContent: 'Включить свечение' }), onSw);
+
+    const body = el('div', 'glow-body');
+    const mode = buildSegment(['Простое', 'Плавное'], settings[key('Mode')], (i) => { settings[key('Mode')] = i; commit(def.key); });
+
+    const slider = (x, label, d) => {
+      const wrap = el('div', 'glow-sl');
+      const lab = el('span', '', { textContent: label });
+      lab.id = `f-glow-${t.k}-${x}-l`;
+      const val = el('span', 'glow-val', { textContent: d.fmt(settings[key(x)]) });
+      const head = el('div', 'glow-sh');
+      head.append(lab, val);
+      const sl = buildSlider(d, settings[key(x)], lab.id, (v) => { settings[key(x)] = v; val.textContent = d.fmt(v); commit(def.key); });
+      wrap.append(head, sl.node);
+      return { node: wrap, set: (v) => { settings[key(x)] = v; sl.set(v); val.textContent = d.fmt(v); } };
+    };
+    const opacity = slider('Opacity', 'Прозрачность', GLOW_OP);
+    const size = slider('Size', 'Размер', t.size);
+
+    const cuId = 'f-glow-cu-' + t.k;
+    const cuLine = el('div', 'glow-line');
+    const colorIn = el('input', '', { type: 'color', value: settings[key('Color')] });
+    colorIn.setAttribute('aria-label', 'Цвет свечения');
+    const cuSw = el('input', 'switch', { id: cuId, type: 'checkbox' });
+    cuLine.append(el('label', '', { htmlFor: cuId, textContent: 'Свой цвет' }), colorIn, cuSw);
+
+    body.append(mode.node, opacity.node, size.node, cuLine);
+    box.append(onLine, body);
+
+    onSw.addEventListener('change', () => { settings[key('')] = onSw.checked; body.style.display = onSw.checked ? '' : 'none'; commit(def.key); });
+    cuSw.addEventListener('change', () => { settings[key('Custom')] = cuSw.checked; colorIn.style.display = cuSw.checked ? '' : 'none'; commit(def.key); });
+    colorIn.addEventListener('input', () => { settings[key('Color')] = colorIn.value; commit(def.key); });
+
+    const sync = () => {
+      onSw.checked = !!settings[key('')];
+      body.style.display = onSw.checked ? '' : 'none';
+      mode.set(settings[key('Mode')]);
+      opacity.set(settings[key('Opacity')]);
+      size.set(settings[key('Size')]);
+      cuSw.checked = !!settings[key('Custom')];
+      colorIn.value = settings[key('Color')];
+      colorIn.style.display = cuSw.checked ? '' : 'none';
+    };
+    node.appendChild(box);
+    return { box, sync };
+  });
+
+  function show() { ui.forEach((u, i) => { u.box.style.display = i === cur ? '' : 'none'; }); }
+  const syncAll = () => { ui.forEach((u) => u.sync()); show(); };
+  syncAll();
+  return { node, set: (v) => { GLOW_KEYS.forEach((k) => { if (v && k in v) settings[k] = v[k]; }); syncAll(); } };
 }
 
 // ── Цвет: один переключатель вместо цепочки тумблеров. 0 — простой цвет, 1 — простой градиент, 2 — полный редактор ──
@@ -1772,6 +1902,10 @@ function makeRow(def) {
     const seg = buildSegment(def.options, settings[def.key], (i) => { settings[def.key] = i; commit(def.key); });
     set = (v) => { settings[def.key] = v; seg.set(v); };
     row.appendChild(seg.node);
+  } else if (def.type === 'glow') {
+    const glow = buildGlow(def);
+    set = glow.set;
+    row.appendChild(glow.node);
   } else {                                                    // paint
     const paint = buildPaint(def);
     set = paint.set;
@@ -2093,7 +2227,7 @@ function recFinish() {
   recStop.style.display = 'none';
   recWarn.style.display = 'none';
   recBack.style.display = 'block';
-  recAgain.textContent = COARSE ? '⬇ Сохранить видео' : '⬇ Скачать ещё раз';
+  recAgain.textContent = COARSE ? '⬇ Скачать видео' : '⬇ Скачать ещё раз';
   recAgain.style.display = recLast.url ? 'block' : 'none';
 }
 
@@ -2113,18 +2247,10 @@ recStop.addEventListener('pointerup', (e) => {
   if (e.clientX >= r.left - m && e.clientX <= r.right + m && e.clientY >= r.top - m && e.clientY <= r.bottom + m) requestStop();
 });
 recStop.addEventListener('click', requestStop);
-// На телефоне — системное меню «Поделиться» (там есть «Сохранить видео»); автоскачивание без жеста Safari часто блокирует
-async function saveLast() {
+// Кнопка скачивает файл напрямую. На телефоне автоскачивание после записи браузеры часто блокируют — там качаем по нажатию кнопки
+function saveLast() {
   if (!recLast.url) return;
-  if (COARSE && recLast.blob && navigator.canShare && navigator.share) {
-    try {
-      const f = new File([recLast.blob], recLast.name, { type: 'video/mp4' });
-      if (navigator.canShare({ files: [f] })) { await navigator.share({ files: [f] }); return; }
-    } catch (e) {
-      if (e && e.name === 'AbortError') return;          // пользователь закрыл меню
-    }
-  }
-  downloadUrl(recLast.url, recLast.name);
+  downloadUrl(recLast.url, recLast.name);                // обычная загрузка файла — без системного меню «Поделиться»
 }
 recAgain.addEventListener('click', saveLast);
 recBack.addEventListener('click', () => {
@@ -2622,7 +2748,7 @@ async function recordFast() {
 
     const wall = (performance.now() - wallStart) / 1000;
     setStatus(
-      `Готово: ${seconds.toFixed(1)} с видео за ${wall.toFixed(1)} с (×${(seconds / wall).toFixed(1)}), ${(blob.size / 1048576).toFixed(1)} МБ. ` + (COARSE ? 'Нажмите «Сохранить видео».' : 'Файл скачан.') +
+      `Готово: ${seconds.toFixed(1)} с видео за ${wall.toFixed(1)} с (×${(seconds / wall).toFixed(1)}), ${(blob.size / 1048576).toFixed(1)} МБ. ` + (COARSE ? 'Нажмите «Скачать видео».' : 'Файл скачан.') +
       (capped ? `\nДостигнут лимит ${REC_MAX_SECONDS} с — запись остановлена.` : '') +
       (audioSkipped ? '\nЗвук не записан: браузер не умеет кодировать AAC/Opus.' : ''),
     );
