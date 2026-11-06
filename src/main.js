@@ -1,65 +1,55 @@
-// ASMR ball & rings — меню настроек + физика и рендеринг (vanilla JS + Canvas 2D)
-// Нужен <canvas> на странице (берётся первый). Меню, превью, кнопка «Назад» и стили создаются из JS.
-// Во время рендеринга: кнопка «← Назад» (или Esc) возвращает в меню, настройки сохраняются.
-
 const TAU = Math.PI * 2;
 
-// ───────────────────────────── Настройки по умолчанию ─────────────────────────────
-// Стартовый набор; цвета выбираются случайно при каждой загрузке страницы.
 const DEFAULTS = {
   ballRadius: 8.5,
   gravity: 360,
-  bounce: 0.9,        // прыгучесть: 1 = упруго, 0 = вялый, >1 = безумный
+  bounce: 0.9,
   ringCount: 12,
   ringSpacing: 14,
   lineWidth: 2,
-  gapSize: 97,        // общий размер отверстий — длина дуги у среднего кольца
-  gapBalance: -0.45,  // баланс отверстий: 0 — одинаковые по всем кольцам, <0 — у центра меньше, у края больше (−0.45 → край ×2.7), >0 — наоборот
-  spin: 0.85,         // общая скорость вращения (рад/сек) у среднего кольца
-  spinBalance: -0.35, // баланс скорости: 0 — все кольца одинаково, <0 — у центра медленнее, у края быстрее (−0.35 → край ×2.2), >0 — наоборот
-  smoothFlip: false,  // плавная смена направления
-  spinDir: 2,         // сторона вращения: 0 — по часовой, 1 — против часовой, 2 — чередуется (разворот при каждом разрушенном кольце)
-  gradient: false,
-  advancedGradient: false,  // расширенный редактор градиента (доступен при включённом градиенте)
-  gradSmooth: true,         // в расширенном редакторе: плавный переход (true) или «классика» — цвета без перехода (false)
-  trail: false,             // след в воздухе за шариком
-  trailOpacity: 0.6,        // прозрачность следа: 1 — плотный, 0.05 — почти невидимый
-  trailLength: 1.2,         // длина следа: через сколько секунд он полностью затирается
-  trailGradient: false,
+  gapSize: 97,
+  gapBalance: -0.45,
+  spin: 0.85,
+  spinBalance: -0.35,
+  smoothFlip: false,
+  spinDir: 2,
+  gradient: true,
+  advancedGradient: false,
+  gradSmooth: true,
+  trail: true,
+  trailOpacity: 0.6,
+  trailLength: 0.4,
+  trailGradient: true,
+  trailBallStart: false,
   trailAdvancedGradient: false,
   trailGradSmooth: true,
-  glowRing: true,           // свечение колец
-  glowRingMode: 0,          // 0 — простое (один контур), 1 — плавный переход
-  glowRingOpacity: 0.16,
-  glowRingSize: 3,          // ширина свечения в толщинах кольца (не шире расстояния между кольцами)
-  glowRingCustom: false,    // свой цвет вместо цвета колец
+  glowRing: true,
+  glowRingMode: 0,
+  glowRingOpacity: 0.35,
+  glowRingSize: 3.5,
+  glowRingCustom: false,
   glowRingColor: '#ffffff',
-  glowBall: true,           // свечение шарика
+  glowBall: true,
   glowBallMode: 1,
   glowBallOpacity: 0.45,
-  glowBallSize: 3,          // радиус свечения в радиусах шарика
-  glowBallCustom: false,    // свой цвет вместо цвета шарика
+  glowBallSize: 3,
+  glowBallCustom: false,
   glowBallColor: '#ffffff',
-  particles: true,    // анимация разрушения колец (частицы)
-  sound: true,        // звук при столкновениях
+  particles: true,
+  sound: true,
 };
 
-// Внутренние константы физики
-const STEP = 1 / 240;     // базовый шаг физики (при высокой скорости делится на подшаги)
-const BALANCE_K = 3;      // при балансе ±1 край и центр различаются в 3² = 9 раз (при ±1.5 — в 27)
-const FLIP_EASE = 6;      // плавность разворота вращения (1/сек)
-const TOP_SPEED = 50;     // минимальная скорость шарика в верхней точке
-const JITTER = 0.12;      // случайный разброс отскока (рад)
-const HOLD_AFTER = 1.6;   // сколько шарик летит за последнее кольцо до перезапуска (сек)
-const MAX_SPEED = 12000;  // предохранитель от «взрыва» энергии
-const REF_VIEW = 142;     // масштаб превью в режиме «кусочек сцены»
+const STEP = 1 / 240;
+const BALANCE_K = 3;
+const FLIP_EASE = 6;
+const TOP_SPEED = 50;
+const JITTER = 0.12;
+const HOLD_AFTER = 1.6;
+const MAX_SPEED = 12000;
+const REF_VIEW = 142;
 
-// Множитель «баланса» для кольца с позицией t (0 — центр, 1 — край).
-// b = 0 → везде 1; b < 0 → у центра меньше, у края больше; b > 0 → наоборот. У среднего кольца (t = 0.5) всегда 1,
-// поэтому «общий» ползунок задаёт величину посередине, а баланс только перекашивает её к центру или к краю.
 const balance = (b, t) => Math.pow(BALANCE_K, b * (1 - 2 * t));
 
-// ───────────────────────────── Цвет ─────────────────────────────
 function hslToHex(h, s, l) {
   const a = s * Math.min(l, 1 - l);
   const f = (n) => {
@@ -76,8 +66,6 @@ const hexToRgb = (hex) => {
 
 const rgbToHex = (rgb) => '#' + rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
 
-// Цвет на позиции t (0..1) по точкам stops = [{ pos, rgb }], отсортированным по pos.
-// smooth — плавный переход; иначе «классика»: берётся цвет ближайшей точки (границы посередине между точками).
 function colorAtStops(stops, smooth, t) {
   const n = stops.length;
   if (n === 1 || t <= stops[0].pos) return stops[0].rgb;
@@ -93,7 +81,6 @@ function colorAtStops(stops, smooth, t) {
   return stops[n - 1].rgb;
 }
 
-// CSS-фон для полосы редактора градиента (stops = [{ pos, color }])
 function gradientCss(stops, smooth) {
   const st = [...stops].sort((a, b) => a.pos - b.pos);
   if (smooth) return `linear-gradient(90deg, ${st.map((x) => `${x.color} ${(x.pos * 100).toFixed(1)}%`).join(', ')})`;
@@ -105,7 +92,6 @@ function gradientCss(stops, smooth) {
   return `linear-gradient(90deg, ${parts.join(', ')})`;
 }
 
-// Случайные цвета: «обычный» — с произвольной насыщенностью и яркостью; «по hue» — только оттенок, насыщенность максимальная
 const randomAnyColor = () => hslToHex(Math.random() * 360, 0.2 + Math.random() * 0.8, 0.2 + Math.random() * 0.6);
 const randomHueColor = () => hslToHex(Math.random() * 360, 1, 0.5);
 
@@ -118,21 +104,23 @@ function randomColors() {
   };
 }
 
-// Телефон / планшет (основной указатель — палец). Для них упрощаем графику и пересобираем часть интерфейса
 const COARSE = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-// На случай, если в HTML нет мета-тега viewport: без него мобильный браузер рисует страницу как десктопную и мелко
-if (!document.querySelector('meta[name="viewport"]')) {
-  const m = document.createElement('meta');
-  m.name = 'viewport';
-  m.content = 'width=device-width, initial-scale=1, viewport-fit=cover';
-  document.head.appendChild(m);
+{
+  const vp = document.querySelector('meta[name="viewport"]');
+  if (!vp) {
+    const m = document.createElement('meta');
+    m.name = 'viewport';
+    m.content = 'width=device-width, initial-scale=1, viewport-fit=cover';
+    document.head.appendChild(m);
+  } else if (!/viewport-fit/.test(vp.content)) {
+    vp.content += ', viewport-fit=cover';
+  }
 }
 
-// ───────────────────────────── Звук ─────────────────────────────
 let audioCtx = null;
 let lastSound = 0;
-const SCALE = [0, 2, 4, 7, 9]; // пентатоника
-const NOTES = 15;              // 3 октавы пентатоники: нота 0 — до пятой октавы (≈523 Гц), нота 14 — ≈3.6 кГц
+const SCALE = [0, 2, 4, 7, 9];
+const NOTES = 15;
 
 function unlockAudio() {
   if (!audioCtx) {
@@ -140,21 +128,16 @@ function unlockAudio() {
     if (!AC) return;
     audioCtx = new AC();
   }
-  // iOS: по умолчанию Web Audio молчит при включённом беззвучном режиме — просим «воспроизведение»
-  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (_) { /* не критично */ }
-  // 'suspended' — до первого жеста, 'interrupted' — после звонка / сворачивания на iOS
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (_) {}
   if (audioCtx.state !== 'running') { const p = audioCtx.resume(); if (p && p.catch) p.catch(() => {}); }
 }
 
-// Контекст мог уснуть (звонок, фон, блокировка): любое касание или возврат на вкладку его будит
 function wakeAudio() {
   if (audioCtx && audioCtx.state !== 'running') { const p = audioCtx.resume(); if (p && p.catch) p.catch(() => {}); }
 }
 document.addEventListener('pointerdown', wakeAudio, { passive: true });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wakeAudio(); });
 
-// k — номер ноты 0..NOTES-1. Основной тон + тихая октава сверху — получается звонкий «колокольчик»
-// ctx — живой AudioContext или OfflineAudioContext (для скоростной записи), t — время старта в секундах контекста
 function scheduleNote(ctx, t, k, vol, dur) {
   k = Math.max(0, Math.min(NOTES - 1, Math.round(k)));
   const semis = SCALE[k % 5] + 12 * Math.floor(k / 5);
@@ -174,7 +157,7 @@ function scheduleNote(ctx, t, k, vol, dur) {
 }
 
 let voices = 0;
-const MAX_VOICES = COARSE ? 14 : 28;   // сколько нот звучит одновременно: на телефоне больше — трески и просадки кадров
+const MAX_VOICES = COARSE ? 14 : 28;
 function playNote(k, vol, dur) {
   if (!audioCtx || audioCtx.state !== 'running') return;
   const now = performance.now();
@@ -186,7 +169,6 @@ function playNote(k, vol, dur) {
   scheduleNote(audioCtx, audioCtx.currentTime, k, vol, dur);
 }
 
-// ───────────────────────────── Симуляция ─────────────────────────────
 function angDiff(a, b) {
   let d = (a - b) % TAU;
   if (d > Math.PI) d -= TAU;
@@ -194,13 +176,6 @@ function angDiff(a, b) {
   return Math.abs(d);
 }
 
-// opts: { getSize: () => [w, h], particles, burst, audio }
-// o.mode:  'full' — все кольца, масштаб по размеру сцены; 'cut' — только центральные кольца в фиксированном масштабе (превью)
-// o.scene: 'play'   — полноценная сцена (шарик, вращение, разрушение колец)
-//          'ball'   — превью шарика: одно закрытое кольцо без отверстия, шарик не выберется
-//          'static' — превью колец/отверстий: без шарика, кольца неподвижны в начальном положении
-//          'spin'   — превью вращения: без шарика, кольца вращаются
-//          'flip'   — как 'spin', но направление вращения меняется каждые пару секунд
 function createSim(canvas, opts) {
   const ctx = canvas.getContext('2d');
   const P = opts.particles;
@@ -210,28 +185,28 @@ function createSim(canvas, opts) {
   const pCol = new Uint8Array(P);
   let pHead = 0;
 
-  const trail = [];               // след шарика: точки { x, y, t }
-  let simT = 0;                   // время симуляции (сек) — по нему вычисляется возраст точек следа
-  let trailCanvas = null, tctx = null;   // буфер, в котором след рисуется сплошным, а прозрачность применяется при выводе
+  const trail = [];
+  let simT = 0;
+  let trailCanvas = null, tctx = null;
 
   const rings = [];
   const ball = { x: 0, y: 0, px: 0, py: 0, vx: 0, vy: 0 };
   const state = { alpha: 0, hold: 0, ending: false, dir: 1, dirTarget: 1, flipT: 0 };
-  const g = {};          // производная геометрия/физика
+  const g = {};
   let cfg = null;
-  const startDir = () => (cfg && cfg.spinDir === 1 ? -1 : 1);   // начальное направление: против часовой — минус
+  const startDir = () => (cfg && cfg.spinDir === 1 ? -1 : 1);
   let running = false, raf = 0, last = 0, acc = 0;
-  let zoom = 1, zoomTarget = 1;   // приближение камеры (колёсико / щипок)
-  let dprAuto = Math.min(window.devicePixelRatio || 1, COARSE ? 2 : 2.5);   // при просадках FPS (opts.adaptive) понижается сам
+  let zoom = 1, zoomTarget = 1;
+  let dprCap = COARSE ? 2 : 2.5;
+  const curDpr = () => Math.max(1, Math.min(window.devicePixelRatio || 1, dprCap));
   let slowFrames = 0;
-  let trailBox = null;            // «грязный» прямоугольник буфера следа — очищаем и выводим только его
-  // Режим скоростной записи: звуки не играются, а складываются в sink с временем по часам симуляции
+  let trailBox = null;
   let sink = null, sinkLast = -1, clock = 0, cycleEnded = false;
 
   function sound(k, vol, dur) {
     if (!opts.audio || !cfg.sound) return;
     if (sink) {
-      if (vol < 0.2 && clock - sinkLast < 0.04) return;   // тот же антиспам, что и в живом режиме
+      if (vol < 0.2 && clock - sinkLast < 0.04) return;
       sinkLast = clock;
       sink.push({ t: clock, k, vol, dur });
     } else {
@@ -239,22 +214,21 @@ function createSim(canvas, opts) {
     }
   }
 
-  // Пересчёт производных величин из настроек
   function derive(c, o) {
     cfg = { ...c };
     const r = cfg.ballRadius, lw = cfg.lineWidth;
     g.pad = r + lw / 2;
-    g.inner = Math.max(54, 3 * r + lw);                    // внутри первого кольца всегда есть место для шарика
-    g.spacing = Math.max(cfg.ringSpacing, 0.5);            // можно сближать кольца до полного слияния
-    g.arena = Math.max(100, 2.2 * r + lw);                 // радиус «тестового полигона» в превью шарика
+    g.inner = Math.max(54, 3 * r + lw);
+    g.spacing = Math.max(cfg.ringSpacing, 0.5);
+    g.arena = Math.max(100, 2.2 * r + lw);
     g.full = Math.max(1, Math.round(cfg.ringCount));
     g.scene = o.scene || 'play';
     g.hasBall = g.scene === 'play' || g.scene === 'ball';
     g.rotates = g.scene !== 'static' && g.scene !== 'ball';
-    g.R0 = g.scene === 'ball' ? g.arena : g.inner;          // радиус первого кольца
+    g.R0 = g.scene === 'ball' ? g.arena : g.inner;
     if (g.scene === 'ball') {
-      g.count = 1;                                          // одно кольцо без отверстия
-      g.view = g.arena + g.pad + 14;                        // полигон занимает почти всё окно превью
+      g.count = 1;
+      g.view = g.arena + g.pad + 14;
     } else if (o.mode === 'cut') {
       g.view = Math.max(REF_VIEW, g.inner + g.pad + 20);
       const fit = Math.floor((g.view - 8 - g.inner) / g.spacing) + 1;
@@ -265,8 +239,7 @@ function createSim(canvas, opts) {
     }
     g.outer = g.R0 + (g.count - 1) * g.spacing;
     g.restitution = 0.7 + 0.3 * cfg.bounce;
-    g.reach = 0.6 + 0.4 * cfg.bounce;                      // до какой доли высоты кольца допрыгивает шарик
-    // цвета колец: один цвет / градиент из двух / расширенный редактор с любым числом точек
+    g.reach = 0.6 + 0.4 * cfg.bounce;
     if (!cfg.gradient) {
       g.stops = [{ pos: 0, rgb: hexToRgb(cfg.ringColor) }];
       g.smooth = true;
@@ -277,8 +250,7 @@ function createSim(canvas, opts) {
       g.stops = [...cfg.gradStops].sort((a, b) => a.pos - b.pos).map((x) => ({ pos: x.pos, rgb: hexToRgb(x.color) }));
       g.smooth = cfg.gradSmooth;
     }
-    g.gbRgb = hexToRgb(cfg.glowBallCustom ? cfg.glowBallColor : cfg.ballColor);   // цвет свечения шарика
-    // цвета следа: позиция 0 — у шарика, 1 — самый старый конец следа
+    g.gbRgb = hexToRgb(cfg.glowBallCustom ? cfg.glowBallColor : cfg.ballColor);
     if (!cfg.trailGradient) {
       g.tStops = [{ pos: 0, rgb: hexToRgb(cfg.trailColor) }];
       g.tSmooth = true;
@@ -294,16 +266,14 @@ function createSim(canvas, opts) {
   function makeRing(i) {
     const t = g.full > 1 ? i / (g.full - 1) : 0;
     const R = g.R0 + i * g.spacing;
-    // длина дуги отверстия = общий размер × баланс; отверстие всегда шире шарика
     const len = cfg.gapSize * balance(cfg.gapBalance, t);
     const half = g.scene === 'ball' ? 0 : Math.min(2.9, Math.max(len / (2 * R), (1.3 * cfg.ballRadius) / R));
     const rgb = colorAtStops(g.stops, g.smooth, t).map(Math.round).join(',');
     return {
       R, half,
-      rot: -Math.PI / 2,                                     // отверстие сверху
+      rot: -Math.PI / 2,
       speed: cfg.spin * balance(cfg.spinBalance, t),
       broken: false,
-      glow: `rgba(${rgb},0.16)`,
       core: `rgb(${rgb})`,
       idx: i,
     };
@@ -330,14 +300,12 @@ function createSim(canvas, opts) {
     ball.vy = Math.sin(a) * 120;
   }
 
-  // Полный перезапуск сцены с анимацией появления
   function configure(c, o = {}) {
     derive(c, o);
     cycleEnded = false;
     build();
   }
 
-  // «Мягкое» обновление: сцена продолжает идти, без перезапуска и анимации появления
   function update(c, o = {}, reset = false) {
     const prevScene = g.scene;
     const hadBall = g.hasBall;
@@ -348,7 +316,7 @@ function createSim(canvas, opts) {
     for (let i = 0; i < g.count; i++) {
       const r = makeRing(i);
       if (old[i]) { r.rot = old[i].rot; r.broken = old[i].broken; }
-      if (frozen) { r.rot = -Math.PI / 2; r.broken = false; }   // неподвижные кольца — всегда в начальном положении
+      if (frozen) { r.rot = -Math.PI / 2; r.broken = false; }
       rings.push(r);
     }
     if (g.scene !== prevScene) {
@@ -356,24 +324,20 @@ function createSim(canvas, opts) {
       state.flipT = 0;
     }
     if (reset) {
-      // сброс в самое начало рендеринга: отверстия наверху, направление исходное, без анимации появления
       for (let i = 0; i < rings.length; i++) rings[i].rot = -Math.PI / 2;
       state.dir = state.dirTarget = startDir();
       state.flipT = 0;
       state.alpha = 1;
     }
     if (!cfg.smoothFlip) state.dir = state.dirTarget;
-    // шарик появился или оказался вне кольца после смены размеров — возвращаем в центр
     if (g.hasBall && (!hadBall || (g.scene === 'ball' && Math.hypot(ball.x, ball.y) > rings[0].R - g.pad))) resetBall();
   }
 
-  // ── Физика ──
   function innermostRadius() {
     for (let i = 0; i < rings.length; i++) if (!rings[i].broken) return rings[i].R;
     return g.outer;
   }
 
-  // Прыгучесть: после удара шарик получает энергию, достаточную, чтобы долететь до нужной высоты кольца
   function keepBouncy() {
     const G = cfg.gravity;
     const top = innermostRadius() - g.pad;
@@ -389,7 +353,7 @@ function createSim(canvas, opts) {
   }
 
   function spawnBurst(ring) {
-    const spread = Math.max(1, g.view / 150);               // на больших сценах частицы разлетаются дальше
+    const spread = Math.max(1, g.view / 150);
     for (let n = 0; n < opts.burst; n++) {
       let a;
       do { a = Math.random() * TAU; } while (angDiff(a, ring.rot) < ring.half);
@@ -406,7 +370,6 @@ function createSim(canvas, opts) {
     }
   }
 
-  // нота кольца: от самой низкой у центра до самой высокой у края — независимо от количества колец
   const noteOf = (ring) => (ring.idx / Math.max(1, g.full - 1)) * (NOTES - 1);
 
   function collideBall() {
@@ -424,19 +387,17 @@ function createSim(canvas, opts) {
       if (ring.broken) continue;
       if (Math.abs(d - ring.R) >= g.pad) continue;
 
-      // шарик целиком в отверстии → кольцо разрушается, шарик летит дальше
       if (angDiff(theta, ring.rot) + cfg.ballRadius / ring.R <= ring.half) {
         ring.broken = true;
-        if (cfg.spinDir === 2) {                            // режим «Чередуется»: смена направления вращения у всех колец
+        if (cfg.spinDir === 2) {
           state.dirTarget = -state.dirTarget;
-          if (!cfg.smoothFlip) state.dir = state.dirTarget; // без плавности — мгновенно
+          if (!cfg.smoothFlip) state.dir = state.dirTarget;
         }
         if (cfg.particles) spawnBurst(ring);
         sound(noteOf(ring), 0.22, 0.9);
         continue;
       }
 
-      // иначе — отскок с той стороны кольца, откуда шарик пришёл
       const side = pd - ring.R >= 0 ? 1 : -1;
       const r = ring.R + side * (g.pad + 0.001);
       ball.x = nx * r;
@@ -461,7 +422,6 @@ function createSim(canvas, opts) {
   }
 
   function stepOnce(dt) {
-    // направление разворачивается плавно (или мгновенно); углы отверстий не сбрасываются
     if (g.rotates) {
       if (cfg.smoothFlip) state.dir += (state.dirTarget - state.dir) * Math.min(1, FLIP_EASE * dt);
       for (let i = 0; i < rings.length; i++) rings[i].rot += rings[i].speed * state.dir * dt;
@@ -479,7 +439,6 @@ function createSim(canvas, opts) {
     collideBall();
   }
 
-  // След: запоминаем позиции шарика и выбрасываем те, что старше trailLength секунд
   function recordTrail(dt) {
     if (!g.hasBall) return;
     simT += dt;
@@ -492,7 +451,6 @@ function createSim(canvas, opts) {
     if (k) trail.splice(0, k);
   }
 
-  // Подшаги: чем быстрее шарик, тем мельче шаг — на экстремальных настройках он не пролетает сквозь кольца
   function step(dt) {
     const sp = g.hasBall ? Math.hypot(ball.vx, ball.vy) : 0;
     const n = Math.min(64, Math.max(1, Math.ceil((sp * dt) / (g.pad * 0.6))));
@@ -515,7 +473,6 @@ function createSim(canvas, opts) {
 
   function updateLifecycle(dt) {
     if (g.scene !== 'play') {
-      // превью: без разрушения и перезапуска; в режиме 'flip' направление меняется каждые ~2 секунды
       if (state.alpha < 1) state.alpha = Math.min(1, state.alpha + dt * 1.5);
       if (g.scene === 'flip') {
         state.flipT += dt;
@@ -531,28 +488,24 @@ function createSim(canvas, opts) {
     }
     if (state.ending) {
       state.alpha -= dt * 1.2;
-      if (state.alpha <= 0) { cycleEnded = true; build(); }   // цикл завершён (для скоростной записи)
+      if (state.alpha <= 0) { cycleEnded = true; build(); }
       return;
     }
     if (state.alpha < 1) state.alpha = Math.min(1, state.alpha + dt * 1.5);
 
-    // последнее кольцо разрушено, шарик вылетел наружу → запускаем заново
     if (rings[rings.length - 1].broken) {
       state.hold += dt;
       if (state.hold > HOLD_AFTER) state.ending = true;
     }
   }
 
-  // ── Рендер ──
-  // След — сужающаяся лента от шарика к хвосту. Рисуется сплошным цветом в отдельный буфер (чтобы перекрывающиеся
-  // участки не накапливали прозрачность), затем целиком выводится с заданной прозрачностью.
   function drawTrail(scale) {
     if (!cfg.trail || !g.hasBall || !trail.length) return;
     const W = canvas.width, H = canvas.height;
     if (!trailCanvas) { trailCanvas = document.createElement('canvas'); tctx = trailCanvas.getContext('2d'); }
     if (trailCanvas.width !== W || trailCanvas.height !== H) { trailCanvas.width = W; trailCanvas.height = H; trailBox = null; }
     tctx.setTransform(1, 0, 0, 1, 0, 0);
-    if (trailBox) tctx.clearRect(trailBox.x, trailBox.y, trailBox.w, trailBox.h);   // не весь экран, а только то, где был след
+    if (trailBox) tctx.clearRect(trailBox.x, trailBox.y, trailBox.w, trailBox.h);
     tctx.setTransform(scale, 0, 0, scale, W / 2, H / 2);
     tctx.lineCap = 'round';
     tctx.lineJoin = 'round';
@@ -560,14 +513,14 @@ function createSim(canvas, opts) {
     const len = Math.max(0.05, cfg.trailLength);
     const full = 2 * Math.max(cfg.ballRadius, 2.5 / scale);
     const n = trail.length;
-    const stride = Math.max(1, Math.ceil(n / 360));       // на длинных следах рисуем не каждую точку
+    const stride = Math.max(1, Math.ceil(n / 360));
     let prev = trail[0];
     let x0 = prev.x * scale + W / 2, x1 = x0, y0 = prev.y * scale + H / 2, y1 = y0;
     const seg = (p) => {
       const sx = p.x * scale + W / 2, sy = p.y * scale + H / 2;
       if (sx < x0) x0 = sx; else if (sx > x1) x1 = sx;
       if (sy < y0) y0 = sy; else if (sy > y1) y1 = sy;
-      const a = Math.min(1, Math.max(0, (simT - (prev.t + p.t) / 2) / len));   // 0 — свежий участок, 1 — самый старый
+      const a = Math.min(1, Math.max(0, (simT - (prev.t + p.t) / 2) / len));
       const w = full * (1 - a);
       if (w > 0.2 / scale) {
         const c = colorAtStops(g.tStops, g.tSmooth, a);
@@ -581,7 +534,7 @@ function createSim(canvas, opts) {
       prev = p;
     };
     for (let i = stride; i < n; i += stride) seg(trail[i]);
-    seg({ x: ball.x, y: ball.y, t: simT });               // последний участок — до самого шарика
+    seg({ x: ball.x, y: ball.y, t: simT });
 
     const pad = full * scale / 2 + 3;
     const bx = Math.max(0, Math.floor(x0 - pad)), by = Math.max(0, Math.floor(y0 - pad));
@@ -599,7 +552,7 @@ function createSim(canvas, opts) {
 
   function render() {
     const scale = (Math.min(canvas.width, canvas.height) / (2 * g.view)) * zoom;
-    const minW = 1.5 / scale;                               // линии никогда не тоньше ~1.5px
+    const minW = 1.5 / scale;
     const lw = Math.max(cfg.lineWidth, minW);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -612,9 +565,6 @@ function createSim(canvas, opts) {
     ctx.lineCap = 'butt';
     ctx.globalAlpha = state.alpha;
 
-    // Свечение колец (настраивается): не шире расстояния между кольцами (соседние не накладываются), а когда кольца сближены
-    // вплотную — исчезает совсем, и они сливаются в сплошной монолит.
-    // Простое — один широкий полупрозрачный контур; плавное — несколько контуров убывающей ширины, их яркость складывается к центру
     if (cfg.glowRing && cfg.glowRingOpacity > 0) {
       const want = lw * cfg.glowRingSize;
       const gw = g.count < 2 ? want : Math.min(want, g.spacing);
@@ -637,7 +587,6 @@ function createSim(canvas, opts) {
       }
     }
 
-    // Основная линия — обычным наложением, без складывания яркости там, где кольца перекрываются
     ctx.globalCompositeOperation = 'source-over';
     ctx.lineWidth = lw;
     for (let i = 0; i < rings.length; i++) {
@@ -669,13 +618,13 @@ function createSim(canvas, opts) {
     if (cfg.glowBall && cfg.glowBallOpacity > 0) {
       const gr = br * cfg.glowBallSize, c = g.gbRgb, op = cfg.glowBallOpacity;
       ctx.globalCompositeOperation = 'lighter';
-      if (cfg.glowBallMode === 1) {                       // плавное: радиальный градиент от центра к прозрачному краю
+      if (cfg.glowBallMode === 1) {
         const grad = ctx.createRadialGradient(ball.x, ball.y, 0, ball.x, ball.y, gr);
         grad.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},${op})`);
         grad.addColorStop(0.4, `rgba(${c[0]},${c[1]},${c[2]},${op * 0.4})`);
         grad.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
         ctx.fillStyle = grad;
-      } else {                                            // простое: один полупрозрачный круг
+      } else {
         ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${op})`;
       }
       ctx.beginPath();
@@ -690,16 +639,14 @@ function createSim(canvas, opts) {
     ctx.globalAlpha = 1;
   }
 
-  // ── Цикл ──
   function frame(now) {
     if (!running) return;
     const raw = (now - last) / 1000;
     const dt = Math.min(raw, 0.05);
     last = now;
-    // Адаптивное качество: если кадры стабильно дольше ~40 мс, снижаем разрешение холста (а не заставляем телефон мучиться)
     if (opts.adaptive && raw < 0.25) {
       if (raw > 0.04) slowFrames++; else if (slowFrames > 0) slowFrames--;
-      if (slowFrames > 40 && dprAuto > 1) { dprAuto = Math.max(1, dprAuto - 0.5); slowFrames = 0; resize(); }
+      if (slowFrames > 40 && curDpr() > 1) { dprCap = Math.max(1, curDpr() - 0.5); slowFrames = 0; resize(); }
     }
     acc += dt;
     while (acc >= STEP) {
@@ -708,13 +655,11 @@ function createSim(canvas, opts) {
     }
     updateParticles(dt);
     updateLifecycle(dt);
-    zoom += (zoomTarget - zoom) * (1 - Math.exp(-14 * dt));   // плавное приближение
+    zoom += (zoomTarget - zoom) * (1 - Math.exp(-14 * dt));
     render();
     raf = requestAnimationFrame(frame);
   }
 
-  // Один кадр с фиксированным dt — без requestAnimationFrame и реальных часов. Для скоростной записи.
-  // Возвращает false, когда сцена завершила полный цикл (последнее кольцо разрушено, всё угасло) — кадр уже не рисуется.
   function advance(dt) {
     acc += dt;
     while (acc >= STEP) {
@@ -730,7 +675,6 @@ function createSim(canvas, opts) {
     return true;
   }
 
-  // Сколько колец уже разрушено — для шкалы прогресса записи
   function progress() {
     let done = 0;
     for (let i = 0; i < rings.length; i++) if (rings[i].broken) done++;
@@ -742,9 +686,13 @@ function createSim(canvas, opts) {
 
   function resize() {
     const [w, h] = opts.getSize();
-    const dpr = opts.dpr || dprAuto;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+    let dpr = opts.dpr || curDpr();
+    const MAX_PIXELS = 12e6;
+    const px = w * h * dpr * dpr;
+    if (px > MAX_PIXELS) dpr *= Math.sqrt(MAX_PIXELS / px);
+    const cw = Math.max(1, Math.round(w * dpr)), ch = Math.max(1, Math.round(h * dpr));
+    if (canvas.width !== cw) canvas.width = cw;
+    if (canvas.height !== ch) canvas.height = ch;
   }
 
   function start() {
@@ -760,7 +708,6 @@ function createSim(canvas, opts) {
     cancelAnimationFrame(raf);
   }
 
-  // factor > 1 — приблизить, < 1 — отдалить; instant — без сглаживания (для жеста щипка)
   function zoomBy(factor, instant) {
     zoomTarget = Math.min(10, Math.max(0.2, zoomTarget * factor));
     if (instant) zoom = zoomTarget;
@@ -773,53 +720,48 @@ function createSim(canvas, opts) {
   return { configure, update, resize, start, stop, zoomBy, resetZoom, advance, beginCapture, endCapture, progress };
 }
 
-// ───────────────────────────── Меню ─────────────────────────────
 const launchColors = randomColors();
 const settings = {
   ...DEFAULTS,
   ...launchColors,
   gradStops: [{ pos: 0, color: launchColors.ringColor }, { pos: 1, color: launchColors.ringColor2 }],
-  gradStopsEdited: false,   // правили ли точки вручную (пока нет — при включении редактора они берутся из двух цветов)
+  gradStopsEdited: false,
   trailColor: launchColors.ballColor,
   trailColor2: launchColors.ringColor,
   trailGradStops: [{ pos: 0, color: launchColors.ballColor }, { pos: 1, color: launchColors.ringColor }],
   trailGradStopsEdited: false,
 };
-// Значения на момент запуска сайта (с теми самыми случайными цветами) — к ним возвращает «Сбросить»
 const INITIAL = JSON.parse(JSON.stringify(settings));
 
 const mainCanvas = document.querySelector('canvas');
 document.documentElement.style.background = '#000';
-Object.assign(document.body.style, { margin: '0', background: '#000', overflow: 'hidden' });
+Object.assign(document.body.style, { margin: '0', background: '#000', overflow: 'hidden', overscrollBehavior: 'none' });
 Object.assign(mainCanvas.style, {
   position: 'fixed', left: '0', top: '0', width: '100%', height: '100%', display: 'block',
-  touchAction: 'none',   // жесты щипка обрабатываем сами, а не браузер
-  webkitUserSelect: 'none', userSelect: 'none', webkitTouchCallout: 'none',   // долгое нажатие не вызывает выделение / лупу на iOS
+  touchAction: 'none',
+  webkitUserSelect: 'none', userSelect: 'none', webkitTouchCallout: 'none',
 });
 
 const mainSim = createSim(mainCanvas, {
-  // размер берём у самого холста (он растянут на 100% layout-вьюпорта): так нет рассинхрона с innerHeight из-за панели Safari
   getSize: () => [mainCanvas.clientWidth || window.innerWidth, mainCanvas.clientHeight || window.innerHeight],
   particles: COARSE ? 700 : 1200, burst: 70, audio: true, adaptive: true, lite: COARSE,
 });
 
-const PREVIEW_SIZE = window.innerWidth < 520 ? 132 : 180;   // стартовый размер окна превью
-let pvSize = PREVIEW_SIZE;                                   // текущая сторона квадратного холста превью (меняется ресайзом)
+const PREVIEW_SIZE = window.innerWidth < 520 ? 132 : 180;
+let pvSize = PREVIEW_SIZE;
 const previewCanvas = document.createElement('canvas');
 previewCanvas.className = 'pv-canvas';
 const preview = createSim(previewCanvas, {
-  getSize: () => [pvSize, pvSize],
+  getSize: () => [previewCanvas.clientWidth || pvSize, previewCanvas.clientHeight || pvSize],
   particles: 250, burst: 24, audio: false, lite: COARSE,
 });
 preview.resize();
 
-// Подпись баланса: во сколько раз край отличается от центра (или наоборот)
 function fmtBalance(v) {
-  if (Math.abs(v) < 0.025) return 'поровну';
+  if (Math.abs(v) < 0.025) return 'одинаково';
   return (v < 0 ? 'край ×' : 'центр ×') + Math.pow(BALANCE_K, 2 * Math.abs(v)).toFixed(1);
 }
 
-// Пункты сгруппированы по смыслу. visible — когда строку вообще показывать.
 const FIELDS = [
   { section: 'Шарик' },
   { key: 'ballRadius', label: 'Размер шарика', type: 'range', min: 1, max: 50, step: 0.5, fmt: (v) => v.toFixed(1) },
@@ -828,11 +770,11 @@ const FIELDS = [
   { key: 'bounce', label: 'Прыгучесть', pct: true, type: 'range', min: 0, max: 2.5, step: 0.05, fmt: (v) => Math.round(v * 100) + '%' },
 
   { section: 'След за шариком' },
-  { key: 'trail', label: 'След в воздухе', type: 'toggle' },
-  { key: 'trailOpacity', label: 'Прозрачность следа', hint: 'влево — прозрачнее, вправо — плотнее', pct: true, type: 'range', min: 0.05, max: 1, step: 0.05, fmt: (v) => Math.round(v * 100) + '%', visible: (s) => s.trail },
-  { key: 'trailLength', label: 'Длина следа', hint: 'через сколько секунд след затирается', type: 'range', min: 0.1, max: 5, step: 0.1, fmt: (v) => v.toFixed(1) + ' с', visible: (s) => s.trail },
+  { key: 'trail', label: 'Показывать след', type: 'toggle' },
+  { key: 'trailOpacity', label: 'Яркость следа', pct: true, type: 'range', min: 0.05, max: 1, step: 0.05, fmt: (v) => Math.round(v * 100) + '%', visible: (s) => s.trail },
+  { key: 'trailLength', label: 'Длина следа', type: 'range', min: 0.1, max: 5, step: 0.1, fmt: (v) => v.toFixed(1) + ' с', visible: (s) => s.trail },
   { key: 'trailPaint', label: 'Цвет следа', type: 'paint', visible: (s) => s.trail,
-    p: { grad: 'trailGradient', adv: 'trailAdvancedGradient', c1: 'trailColor', c2: 'trailColor2', stops: 'trailGradStops', smooth: 'trailGradSmooth', edited: 'trailGradStopsEdited' } },
+    p: { grad: 'trailGradient', adv: 'trailAdvancedGradient', c1: 'trailColor', c2: 'trailColor2', stops: 'trailGradStops', smooth: 'trailGradSmooth', edited: 'trailGradStopsEdited', ballStart: 'trailBallStart' } },
 
   { section: 'Кольца' },
   { key: 'ringCount', label: 'Количество колец', type: 'range', min: 1, max: 25, step: 1, fmt: (v) => v.toFixed(0) },
@@ -843,48 +785,44 @@ const FIELDS = [
 
   { section: 'Отверстия' },
   { key: 'gapSize', label: 'Размер отверстий', type: 'range', min: 2, max: 1500, step: 1, fmt: (v) => v.toFixed(0) },
-  { key: 'gapBalance', label: 'Баланс отверстий', hint: 'влево — край больше, вправо — центр больше', type: 'range', min: -1.5, max: 1.5, step: 0.05, fmt: fmtBalance },
+  { key: 'gapBalance', label: 'Отверстия: центр и край', type: 'range', min: -1.5, max: 1.5, step: 0.05, fmt: fmtBalance },
 
   { section: 'Вращение' },
   { key: 'spin', label: 'Скорость вращения', type: 'range', min: 0, max: 15, step: 0.05, fmt: (v) => v.toFixed(2) },
-  { key: 'spinBalance', label: 'Баланс скорости', hint: 'влево — край быстрее, вправо — центр быстрее', type: 'range', min: -1.5, max: 1.5, step: 0.05, fmt: fmtBalance },
-  { key: 'spinDir', label: 'Сторона вращения', hint: 'в какую сторону крутятся кольца', type: 'segment', options: ['По часовой', 'Против часовой', 'Чередуется'] },
+  { key: 'spinBalance', label: 'Скорость: центр и край', type: 'range', min: -1.5, max: 1.5, step: 0.05, fmt: fmtBalance },
+  { key: 'spinDir', label: 'Направление вращения', type: 'segment', options: ['По часовой', 'Против часовой', 'Чередуется'] },
   { key: 'smoothFlip', label: 'Плавная смена направления', type: 'toggle', visible: (s) => s.spinDir === 2 },
 
   { section: 'Эффекты' },
-  { key: 'glow', label: 'Свечение', hint: 'колец и шарика', type: 'glow' },
-  { key: 'particles', label: 'Анимация разрушения колец', type: 'toggle' },
-  { key: 'sound', label: 'Звук при столкновениях', type: 'toggle', noRandomAll: true },   // «Рандомизировать всё» звук не трогает
+  { key: 'glow', label: 'Свечение', type: 'glow' },
+  { key: 'particles', label: 'Осколки при разрушении колец', type: 'toggle' },
+  { key: 'sound', label: 'Звук при столкновениях', type: 'toggle', noRandomAll: true },
 ];
 
-// Описания для кнопок «i» на карточках: что делает настройка и зачем она нужна (абзацы разделяются переводом строки)
 const INFO = {
-  ballRadius: 'Чем крупнее шарик, тем сильнее он перекрывает проходы: кольцо разрушается только тогда, когда шарик целиком помещается в отверстие. Слишком большой шарик может вообще не пролезать.',
-  ballColor: 'Лучше выбирать оттенок, который контрастирует с кольцами, — тогда шарик не сливается с ними и его хорошо видно.',
-  gravity: 'Сила, которая тянет шарик вниз.\nЧем она больше, тем быстрее шарик падает и тем резче отскакивает. При нуле он летает по инерции и не падает. Влияет и на ритм ударов, а значит, и на звук.',
-  bounce: 'Насколько энергично шарик отскакивает от колец.\n100% — упругий удар без потерь. Меньше — шарик с каждым ударом теряет скорость. Больше — каждый удар добавляет энергии, и движение становится всё более безумным.',
-  trail: 'Включает след в воздухе: за шариком остаётся тающая лента, по которой видна траектория движения.\nПосле включения появятся настройки прозрачности, длины и цвета следа.',
-  trailOpacity: 'Насколько заметен след.\nВлево — почти прозрачный, вправо — плотный. Прозрачность применяется ко всему следу целиком, поэтому места, где он пересекает сам себя, не темнеют.',
-  trailLength: 'Как долго след остаётся в воздухе: через столько секунд его точка полностью затирается.\nКороткий след — маленький хвостик за шариком, длинный — вся траектория за последние секунды.',
-  trailPaint: 'Цвет следа.\n«Цвет» — один оттенок. «Градиент» — плавный переход между двумя цветами от шарика к концу следа. «Редактор» — собственный градиент из любого числа точек: их можно добавлять, двигать и удалять, а также переключать плавный и ступенчатый переход.',
-  ringCount: 'Сколько колец-препятствий вложено друг в друга.\nШарик должен пробить их все по очереди, поэтому чем больше колец, тем дольше длится один рендеринг.',
-  ringSpacing: 'При малом расстоянии кольца плотно сидят друг в друге и шарик почти сразу упирается в следующее. При большом между ними много свободного места для полёта.',
+  ballRadius: 'Чем крупнее шарик, тем труднее ему пролезть в отверстия: кольцо ломается, только если шарик целиком помещается в отверстие. Слишком большой шарик может вообще не пройти.',
+  ballColor: 'Лучше выбрать цвет, заметно отличающийся от цвета колец, — тогда шарик не сливается с ними.',
+  gravity: 'Сила, которая тянет шарик вниз.\nЧем она больше, тем быстрее шарик падает и тем резче отскакивает. При нуле шарик не падает, а летает по инерции. Гравитация влияет и на ритм ударов, а значит, и на звук.',
+  bounce: 'Насколько сильно шарик отскакивает от колец.\n100% — упругий удар без потерь. Меньше — с каждым ударом шарик теряет скорость. Больше — с каждым ударом он набирает скорость, и движение становится всё более безумным.',
+  trail: 'За шариком остаётся тающая лента — след его движения.\nПосле включения появятся настройки яркости, длины и цвета следа.',
+  trailOpacity: 'Насколько заметен след.\nВлево — почти не виден, вправо — яркий и плотный. Настройка действует на весь след сразу, поэтому там, где след пересекает сам себя, цвет не становится гуще.',
+  trailLength: 'Как долго след остаётся виден: через столько секунд каждая его точка полностью исчезает.\nКороткий след — небольшой хвостик за шариком, длинный — вся траектория за последние секунды.',
+  trailPaint: 'Цвет следа.\n«Один цвет» — след одного цвета по всей длине. «Градиент» — плавный переход между двумя цветами от шарика к концу следа. «Свой градиент» — градиент из любого числа точек: их можно добавлять, двигать и удалять. Выключатель «Плавный градиент» убирает плавность: цвета сменяют друг друга ступенями.\nВыключатель «Начало следа — цвет шарика» делает первую точку следа такого же цвета, как шарик, даже если вы потом измените цвет шарика. Если выбрать для этой точки другой цвет, выключатель отключится сам. На длину и яркость следа он не влияет.',
+  ringCount: 'Сколько колец вложено друг в друга.\nШарик должен пробить их все по очереди, поэтому чем больше колец, тем дольше длится сцена.',
+  ringSpacing: 'При малом расстоянии кольца плотно прилегают друг к другу, и шарик почти сразу упирается в следующее. При большом между кольцами много места для полёта.',
   lineWidth: 'Толстые кольца выглядят массивнее и сильнее бросаются в глаза, тонкие — изящнее и легче.',
-  ringPaint: 'Цвет колец.\n«Цвет» — один оттенок для всех колец. «Градиент» — плавный переход между двумя цветами от центра к краю. «Редактор» — собственный градиент из любого числа точек: их можно добавлять, двигать и удалять, а также переключать плавный и ступенчатый переход.',
-  gapSize: 'Размер отверстий в кольцах — длина дуги у среднего кольца.\nБольшие отверстия шарик проходит легко, маленькие требуют точного попадания и растягивают рендеринг.',
-  gapBalance: 'Как размер отверстий распределяется между кольцами.\nВлево — у центра отверстия меньше, у края больше. Вправо — наоборот. По центру — у всех колец одинаковые.',
-  spin: 'Общая скорость вращения колец (у среднего кольца).\nЧем она выше, тем быстрее убегают отверстия и тем сложнее шарику в них попасть. При нуле кольца стоят неподвижно.',
-  spinBalance: 'Как скорость вращения распределяется между кольцами.\nВлево — внешние кольца крутятся быстрее внутренних. Вправо — наоборот. По центру — все кольца вращаются одинаково.',
-  spinDir: 'В какую сторону вращаются кольца.\n«По часовой» и «Против часовой» — кольца всегда крутятся в одну выбранную сторону. «Чередуется» — направление меняется на противоположное каждый раз, когда шарик разрушает очередное кольцо.',
-  smoothFlip: 'Как кольца разворачиваются при смене направления.\nВыключено — мгновенно, резким рывком. Включено — кольца плавно тормозят и разгоняются в обратную сторону. Доступно, когда выбрана сторона «Чередуется».',
-  glow: 'Мягкое свечение вокруг колец и шарика. Вкладки «Кольца» и «Шарик» настраиваются отдельно.\n«Простое» — один полупрозрачный контур, «Плавное» — свечение, мягко тающее к краям. Прозрачность задаёт яркость, размер — насколько далеко свечение расходится. У колец оно не шире расстояния между ними, поэтому у плотно сжатых колец пропадает. По умолчанию цвет берётся у самих колец и шарика, но можно выбрать свой.',
-  particles: 'Эффект разрушения колец: в момент пробития кольцо рассыпается на разлетающиеся частицы.\nЕсли выключить, кольцо просто исчезнет — так нагрузка на устройство ниже.',
-  sound: 'Звук столкновений: удары шарика и разрушение колец играют ноты гармоничной гаммы.\nКнопка «Рандомизировать всё» этот переключатель не трогает.',
+  ringPaint: 'Цвет колец.\n«Один цвет» — все кольца одного цвета. «Градиент» — плавный переход между двумя цветами от центра к краю. «Свой градиент» — градиент из любого числа точек: их можно добавлять, двигать и удалять. Выключатель «Плавный градиент» убирает плавность: цвета сменяют друг друга ступенями.',
+  gapSize: 'Размер отверстий в кольцах — длина дуги у среднего кольца.\nЧерез большие отверстия шарик проходит легко, а в маленькие нужно попасть точно, поэтому сцена длится дольше.',
+  gapBalance: 'Как размер отверстий меняется от центра к краю.\nВлево — у центра отверстия меньше, у края больше (подпись «край ×2» значит, что у края они примерно вдвое больше). Вправо — наоборот, больше у центра. По центру — у всех колец отверстия одинаковые.',
+  spin: 'Скорость вращения среднего кольца.\nЧем она выше, тем быстрее убегают отверстия и тем труднее шарику в них попасть. При нуле кольца стоят на месте.',
+  spinBalance: 'Как скорость вращения меняется от центра к краю.\nВлево — внешние кольца крутятся быстрее внутренних (подпись «край ×2» значит, что примерно вдвое быстрее). Вправо — наоборот. По центру — все кольца вращаются с одной скоростью.',
+  spinDir: 'В какую сторону вращаются кольца.\n«По часовой» и «Против часовой» — кольца всегда крутятся в выбранную сторону. «Чередуется» — каждый раз, когда шарик разрушает кольцо, направление меняется на противоположное.',
+  smoothFlip: 'Как кольца меняют направление.\nВыключено — мгновенно, рывком. Включено — кольца плавно тормозят и разгоняются в обратную сторону. Доступно, когда выбрано «Чередуется».',
+  glow: 'Мягкое свечение вокруг колец и шарика. Для колец и для шарика оно настраивается отдельно — на вкладках «Кольца» и «Шарик».\n«Простое» — один полупрозрачный контур. «Плавное» — свечение, которое постепенно тает к краям. «Яркость» задаёт силу свечения, «Размер» — как далеко оно расходится. У колец оно не шире расстояния между ними, поэтому у плотно сжатых колец свечения нет. По умолчанию цвет свечения такой же, как у колец и шарика, но можно выбрать свой.',
+  particles: 'В момент пробития кольцо рассыпается на разлетающиеся осколки.\nЕсли выключить, кольцо просто исчезнет — так устройству работать легче.',
+  sound: 'Удары шарика и разрушение колец звучат нотами одной гаммы, поэтому звук получается мелодичным.\nКнопка «Случайные настройки» этот переключатель не меняет.',
 };
 
-// Что показывает превью для каждого пункта (у пунктов без записи превью нет)
-//   ball   — одно закрытое кольцо + шарик      static — неподвижные кольца, без шарика
-//   spin   — вращающиеся кольца, без шарика    flip   — вращение со сменой направления каждые ~2 с, без шарика
 const SCENES = {
   ballRadius: 'ball', ballColor: 'ball', gravity: 'ball', bounce: 'ball',
   trail: 'ball', trailOpacity: 'ball', trailLength: 'ball', trailPaint: 'ball', glow: 'ball',
@@ -893,11 +831,8 @@ const SCENES = {
   spin: 'spin', spinBalance: 'spin', spinDir: 'spin', smoothFlip: 'flip',
 };
 
-// Только для этих пунктов превью показывает центральные кольца в фиксированном масштабе (чтобы было видно, как они раздвигаются
-// и утолщаются). Во всех остальных превью (кроме шарика) видны ВСЕ кольца целиком — иначе не оценить пропорции.
 const FIXED_KEYS = new Set(['ringSpacing', 'lineWidth']);
 
-// Пункты раздела «Вращение»: при любом изменении превью начинается заново (без плавного появления)
 const ROTATION_KEYS = new Set(['spin', 'spinBalance', 'spinDir', 'smoothFlip']);
 
 const CSS = `
@@ -906,16 +841,17 @@ const CSS = `
   overscroll-behavior:contain;box-sizing:border-box;background:var(--bg);color:var(--text);
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--gutter:12px;
   padding:max(24px,env(safe-area-inset-top)) calc(var(--gutter) + env(safe-area-inset-right)) max(32px,env(safe-area-inset-bottom)) calc(var(--gutter) + env(safe-area-inset-left))}
-.asmr-panel{width:min(520px,100%);margin:auto 0}
+.asmr-panel{width:min(520px,100%);min-width:0;margin:auto 0}
+.asmr-cols{display:flex;gap:12px;align-items:flex-start}
+.asmr-col{flex:1 1 0;min-width:0;display:flex;flex-direction:column}
 @media (min-width:820px){
-.asmr-panel{width:min(1080px,100%);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px;align-content:start}
-.asmr-panel>h1,.asmr-panel>p,.asmr-panel>.asmr-warn,.asmr-panel>.asmr-top,.asmr-panel>.sec,.asmr-panel>.asmr-start,.asmr-panel>.asmr-fast{grid-column:1/-1}
+.asmr-panel{width:min(1080px,100%)}
 }
 @media (min-width:1000px){
-.asmr-menu{padding-right:calc(var(--pv-space) + env(safe-area-inset-right))}   /* справа остаётся место под превью — оно не перекрывает карточки */
+.asmr-menu{padding-right:calc(var(--pv-space) + env(safe-area-inset-right))}
 }
 @media (min-width:1500px){
-.asmr-panel{width:min(1500px,100%);grid-template-columns:repeat(3,minmax(0,1fr))}
+.asmr-panel{width:min(1500px,100%)}
 }
 .asmr-panel h1{margin:0 0 4px;font-size:21px;font-weight:600;text-align:center}
 .asmr-panel p{margin:0 0 14px;text-align:center;font-size:13px;color:var(--muted)}
@@ -925,9 +861,14 @@ const CSS = `
 .asmr-menu .sec{margin:22px 4px 8px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .asmr-menu .row{border:1px solid var(--line);border-radius:14px;background:var(--surface);padding:4px 12px 10px;margin:0 0 8px}
 .asmr-menu .row.active{border-color:var(--accent)}
+.asmr-menu .card{border:1px solid var(--line);border-radius:16px;background:var(--surface);padding:6px 14px 8px;margin:0 0 12px;min-width:0}
+.asmr-panel>.card{align-self:start}
+.card-title{margin:10px 0 4px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.asmr-menu .card .row{border:0;border-radius:0;background:none;box-shadow:none;margin:0;padding:2px 0 10px}
+.asmr-menu .card .row+.row{border-top:1px solid var(--line);padding-top:6px}
+.asmr-menu .card .row.active{background:rgba(138,162,255,.07);border-radius:10px;margin:0 -8px;padding-left:8px;padding-right:8px;border-top-color:transparent;box-shadow:none}
 .row .head{display:flex;align-items:center;gap:8px;min-height:38px}
 .row .head label{flex:1;min-width:0;font-size:14px;line-height:1.3}
-.row .head label small{display:block;margin-top:2px;font-size:12.5px;line-height:1.35;color:var(--muted)}
 .row .acts{display:flex;flex:none;margin-right:-6px}
 .row .acts button{width:34px;height:34px;padding:0;display:grid;place-items:center;border:0;border-radius:9px;background:none;color:var(--muted);cursor:pointer}
 .row .acts button:active{background:var(--surface2);color:var(--text)}
@@ -935,12 +876,11 @@ const CSS = `
 .row .val{flex:none;box-sizing:border-box;width:96px;height:40px;padding:0 10px;text-align:right;font:500 16px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   color:var(--text);background:var(--bg);border:1px solid var(--line2);border-radius:10px;font-variant-numeric:tabular-nums;outline:none}
 .row .val:focus{border-color:var(--accent)}
-.row input[type=color],.paint input[type=color],.ginfo input[type=color]{flex:none;width:56px;height:44px;padding:0;border:1px solid var(--line2);border-radius:9px;background:none;cursor:pointer}
 input[type=color]::-webkit-color-swatch-wrapper{padding:0}
 input[type=color]::-webkit-color-swatch{border:0;border-radius:7px}
 input[type=color]::-moz-color-swatch{border:0;border-radius:7px}
 input.switch{appearance:none;-webkit-appearance:none;flex:none;width:56px;height:32px;margin:0;border:0;border-radius:16px;background:var(--line2);position:relative;cursor:pointer;transition:background .15s}
-input.switch::before{content:"";position:absolute;inset:-8px -4px}   /* невидимое расширение зоны нажатия до 48 px */
+input.switch::before{content:"";position:absolute;inset:-8px -4px}
 input.switch::after{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:var(--text);transition:transform .15s}
 input.switch:checked{background:var(--accent)}
 input.switch:checked::after{transform:translateX(24px)}
@@ -967,8 +907,14 @@ input.switch:checked::after{transform:translateX(24px)}
 .seg span.on{color:#0e0f13}
 .seg:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .pcols{display:flex;align-items:center;gap:10px}
-.pcols input[type=color]{width:56px;height:44px}
-.pcols input.wide{flex:1;width:auto}
+.pcols .cswatch.wide{flex:1;width:auto}
+.pball{display:flex;align-items:center;gap:10px;min-height:34px;font-size:13px;color:var(--muted)}
+.pball label{flex:1;min-width:0}
+.pball input.switch{width:44px;height:26px;border-radius:13px}
+.pball input.switch::after{top:3px;left:3px;width:20px;height:20px}
+.pball input.switch:checked::after{transform:translateX(18px)}
+.pball input.switch:active::after{width:25px}
+.pball input.switch:checked:active::after{transform:translateX(13px)}
 .pbar{flex:1;height:44px;border-radius:9px;border:1px solid var(--line2)}
 .gbody{display:flex;flex-direction:column;gap:12px}
 .gbar{height:36px;margin:0 22px;border-radius:18px;border:1px solid var(--line2)}
@@ -988,7 +934,6 @@ input.switch:checked::after{transform:translateX(24px)}
 .gbtns button:disabled{opacity:.4;cursor:default}
 .gsmooth{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);font-size:13px}
 .gsmooth label{flex:1;min-width:0}
-.gsmooth small{display:block;margin-top:2px;font-size:12.5px;line-height:1.35;color:var(--muted)}
 .asmr-start{display:block;width:100%;margin-top:20px;padding:15px;border:0;border-radius:14px;font-size:16px;font-weight:600;
   color:var(--bg);background:var(--text);cursor:pointer;transition:transform .1s}
 .asmr-start:active{transform:scale(.98)}
@@ -1000,7 +945,7 @@ input.switch:checked::after{transform:translateX(24px)}
 .asmr-fast:disabled{opacity:.6}
 .asmr-status{min-height:18px;margin-top:10px;font-size:12px;line-height:1.5;text-align:center;color:var(--muted);font-variant-numeric:tabular-nums;white-space:pre-line}
 .asmr-status.err{color:var(--danger)}
-.asmr-pv{position:fixed;z-index:11;box-sizing:border-box;overflow:hidden;border-radius:14px;background:#000;border:1px solid var(--line2);
+.asmr-pv{position:fixed;z-index:11;box-sizing:content-box;overflow:hidden;border-radius:14px;background:#000;border:1px solid var(--line2);
   box-shadow:0 10px 40px rgba(0,0,0,.55);-webkit-user-select:none;user-select:none}
 .pv-head{display:flex;align-items:center;gap:6px;box-sizing:border-box;padding:0 4px 0 10px;background:var(--surface);color:var(--muted);
   font:500 12px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;cursor:grab;touch-action:none}
@@ -1054,7 +999,7 @@ button{touch-action:manipulation}
   background:rgba(4,5,9,.58);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);overscroll-behavior:contain;touch-action:none;
   opacity:0;visibility:hidden;pointer-events:none;transition:opacity .22s ease,visibility 0s linear .22s}
 .asmr-modal.open{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .22s ease,visibility 0s}
-.asmr-modal .box{width:min(420px,100%);max-height:min(80vh,560px);overflow-y:auto;touch-action:pan-y;box-sizing:border-box;padding:18px 18px 20px;
+.asmr-modal .box{width:min(420px,100%);max-height:min(80vh,560px);max-height:min(80dvh,560px);overflow-y:auto;touch-action:pan-y;box-sizing:border-box;padding:18px 18px 20px;
   border:1px solid var(--line2);border-radius:18px;background:var(--surface);color:var(--text);box-shadow:0 20px 60px rgba(0,0,0,.5);
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;transform:translateY(14px) scale(.96);transition:transform .28s cubic-bezier(.2,.9,.3,1.15)}
 .asmr-modal.open .box{transform:none}
@@ -1065,8 +1010,8 @@ button{touch-action:manipulation}
 .asmr-modal .x:hover{background:var(--surface2);color:var(--text)}
 .asmr-modal .x:active{transform:scale(.9)}
 .asmr-modal .mb{font-size:14px;line-height:1.6;color:#c9ccd6;white-space:pre-line}
-.asmr-panel>.row,.asmr-panel>.sec,.asmr-panel>.asmr-warn{animation:asmr-rise .4s ease both}
-.asmr-panel.intro>.row,.asmr-panel.intro>.sec{animation-delay:calc(var(--i,0)*35ms)}
+.asmr-panel>.asmr-warn{animation:asmr-rise .4s ease both}
+.asmr-panel.intro .asmr-col>.card{animation:asmr-rise .4s ease both;animation-delay:calc(var(--i,0)*70ms)}
 .asmr-menu .row{transition:border-color .2s ease,box-shadow .25s ease}
 .asmr-menu .row.active{box-shadow:0 0 0 3px rgba(138,162,255,.12)}
 .paint>*:not(.seg){animation:asmr-fade .28s ease}
@@ -1099,34 +1044,30 @@ const el = (tag, cls, props) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (props) Object.assign(e, props);
+  if (tag === 'input') e.setAttribute('autocomplete', 'off');
   return e;
 };
 
 const menu = el('div', 'asmr-menu');
 const panel = el('div', 'asmr-panel');
-panel.innerHTML = '<h1>ASMR Physics</h1><p>Настройте параметры и запустите рендеринг</p>';
+panel.innerHTML = '<h1>ASMR Physics</h1><p>Настройте шарик и кольца, затем запустите сцену</p>';
 
-// Предупреждение для людей с фоточувствительной эпилепсией — вверху страницы, сразу видно при входе
 const warn = el('div', 'asmr-warn');
 warn.setAttribute('role', 'note');
 warn.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
   + '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
-  + '<div><b>Предупреждение о фоточувствительности</b>'
+  + '<div><b>Предупреждение: яркие вспышки</b>'
   + '<span>Резкие вспышки и перепады яркости могут вызвать приступ у людей с фоточувствительной эпилепсией.</span>'
   + '<details><summary>Подробнее</summary>'
-  + '<span>В превью и при рендеринге есть резкие переходы и яркие вспышки — это часть задумки, и убрать их нельзя. '
-  + 'Если вы склонны к таким приступам, не запускайте превью и рендеринг. '
-  + 'Если почувствовали недомогание, сразу прекратите просмотр.</span></details></div>';
+  + '<span>Резкие смены яркости и вспышки есть и в превью, и в самой сцене — это часть задумки, отключить их нельзя. '
+  + 'Если вы склонны к таким приступам, не открывайте превью и не запускайте сцену. '
+  + 'Если почувствовали себя плохо, сразу прекратите просмотр.</span></details></div>';
 panel.appendChild(warn);
 menu.appendChild(panel);
 
-// ── Превью ──
-// Плавающее окно: всегда на экране, пока открыто главное меню (на время рендеринга и записи скрывается само).
-// Его можно перетаскивать за заголовок, менять размер уголком, сворачивать в полоску и открывать обратно.
-// Когда ни одна карточка не выбрана, в нём идёт обычная сцена целиком (шарик, вращение, разрушение колец).
 let activeRow = null;
-let previewOn = false;     // сцена превью уже настроена
-let pvSig = '';            // что сейчас показывается (режим + сцена) — чтобы зря не перезапускать
+let previewOn = false;
+let pvSig = '';
 
 const PV_HEAD = COARSE ? 40 : 34;
 const PV_MIN_SIZE = 120;
@@ -1137,7 +1078,7 @@ let pvX = 0, pvY = 0, pvMin = false;
 const pvWrap = el('div', 'asmr-pv');
 const pvHead = el('div', 'pv-head');
 pvHead.style.height = PV_HEAD + 'px';
-pvHead.title = 'Перетащите, чтобы переместить (двойной клик — свернуть)';
+pvHead.title = 'Перетащите, чтобы передвинуть. Двойной клик — свернуть';
 const pvBody = el('div', 'pv-body');
 const pvTitle = el('span', 'pv-title', { textContent: 'Превью' });
 const pvMinBtn = el('button', 'pv-btn', { type: 'button' });
@@ -1156,10 +1097,9 @@ const pvClamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const pvMaxSize = () => Math.max(PV_MIN_SIZE, Math.min(window.innerWidth - 8, window.innerHeight - PV_HEAD - 8, 640));
 
 function pvSave() {
-  try { localStorage.setItem(PV_KEY, JSON.stringify({ x: pvX, y: pvY, s: pvSize, m: pvMin })); } catch (_) { /* не критично */ }
+  try { localStorage.setItem(PV_KEY, JSON.stringify({ x: pvX, y: pvY, s: pvSize, m: pvMin })); } catch (_) {}
 }
 
-// Размер и положение окна: всегда целиком в пределах экрана
 function pvLayout() {
   pvSize = pvClamp(Math.round(pvSize), PV_MIN_SIZE, pvMaxSize());
   const w = pvMin ? PV_STRIP_W : pvSize;
@@ -1173,12 +1113,11 @@ function pvLayout() {
 }
 
 let pvRaf = 0;
-function pvQueueCanvasResize() {            // холст пересчитываем не чаще раза за кадр
+function pvQueueCanvasResize() {
   if (pvRaf) return;
   pvRaf = requestAnimationFrame(() => { pvRaf = 0; if (!pvMin) preview.resize(); });
 }
 
-// Превью крутится, только пока видно меню и окно развёрнуто; на рендеринге и записи его нет вообще
 function pvApplyRun() {
   const menuVisible = menu.style.display !== 'none';
   pvWrap.style.display = menuVisible ? 'block' : 'none';
@@ -1197,14 +1136,14 @@ function setPvMin(v) {
   pvSave();
 }
 pvMinBtn.addEventListener('click', () => setPvMin(!pvMin));
-pvHead.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) setPvMin(!pvMin); });
+pvHead.addEventListener('dblclick', (e) => { if (!e.target.closest('button') && performance.now() - pvOpenedAt > 500) setPvMin(!pvMin); });
 
-// Перетаскивание за заголовок (мышь, палец, перо). Короткое касание свёрнутой полоски разворачивает окно
 let pvDrag = null;
+let pvOpenedAt = 0;
 pvHead.addEventListener('pointerdown', (e) => {
   if (e.target.closest('button') || (e.pointerType === 'mouse' && e.button !== 0)) return;
   pvDrag = { id: e.pointerId, dx: e.clientX - pvX, dy: e.clientY - pvY, sx: e.clientX, sy: e.clientY, moved: false };
-  try { pvHead.setPointerCapture(e.pointerId); } catch (_) { /* не критично */ }
+  try { pvHead.setPointerCapture(e.pointerId); } catch (_) {}
   pvWrap.classList.add('drag');
   e.preventDefault();
 });
@@ -1221,18 +1160,17 @@ const pvEndDrag = (e) => {
   const d = pvDrag;
   pvDrag = null;
   pvWrap.classList.remove('drag');
-  if (!d.moved && pvMin && e.type === 'pointerup') setPvMin(false);
+  if (!d.moved && pvMin && e.type === 'pointerup') { pvOpenedAt = performance.now(); setPvMin(false); }
   else pvSave();
 };
 pvHead.addEventListener('pointerup', pvEndDrag);
 pvHead.addEventListener('pointercancel', pvEndDrag);
 
-// Изменение размера уголком (окно остаётся квадратным — сцена круглая)
 let pvRs = null;
 pvGrip.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'mouse' && e.button !== 0) return;
   pvRs = { id: e.pointerId, sx: e.clientX, sy: e.clientY, s0: pvSize };
-  try { pvGrip.setPointerCapture(e.pointerId); } catch (_) { /* не критично */ }
+  try { pvGrip.setPointerCapture(e.pointerId); } catch (_) {}
   pvWrap.classList.add('drag');
   e.preventDefault();
   e.stopPropagation();
@@ -1252,10 +1190,9 @@ const pvEndResize = (e) => {
 pvGrip.addEventListener('pointerup', pvEndResize);
 pvGrip.addEventListener('pointercancel', pvEndResize);
 
-// Стартовое состояние: прошлое положение (если было) или правый верхний угол
 (function pvInit() {
   let saved = null;
-  try { saved = JSON.parse(localStorage.getItem(PV_KEY) || 'null'); } catch (_) { /* нет или битое */ }
+  try { saved = JSON.parse(localStorage.getItem(PV_KEY) || 'null'); } catch (_) {}
   if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y) && Number.isFinite(saved.s)) {
     pvX = saved.x; pvY = saved.y; pvSize = saved.s; pvMin = !!saved.m;
   } else {
@@ -1270,7 +1207,6 @@ pvGrip.addEventListener('pointercancel', pvEndResize);
   pvLayout();
 })();
 
-// Что показывать в превью для выбранного пункта; без выбора (или у пунктов без своей сцены) — обычная сцена целиком
 function syncPreview(key) {
   const scene = !key ? 'play' : key === 'spinDir' ? (settings.spinDir === 2 ? 'flip' : 'spin') : (SCENES[key] || 'play');
   const o = { mode: key && FIXED_KEYS.has(key) ? 'cut' : 'full', scene };
@@ -1294,8 +1230,6 @@ function activate(row, key, changed) {
   syncPreview(key);
 }
 
-// Снимает выделение карточки и возвращает превью к обычной сцене. Само окно НЕ скрывается.
-// force — перезапустить сцену с нуля (после «Рандомизировать всё» / «Сбросить всё»)
 function hidePreview(force) {
   if (activeRow) activeRow.classList.remove('active');
   activeRow = null;
@@ -1306,9 +1240,8 @@ function hidePreview(force) {
   }
 }
 
-// ── Случайные и начальные значения ──
 function randomStops(hue) {
-  const n = 2 + Math.floor(Math.random() * 4);               // 2–5 точек
+  const n = 2 + Math.floor(Math.random() * 4);
   const pos = [0, 1];
   for (let i = 2; i < n; i++) pos.push(Math.round(Math.random() * 100) / 100);
   pos.sort((a, b) => a - b);
@@ -1320,7 +1253,7 @@ function randomStops(hue) {
 }
 
 function randomValue(def, hue) {
-  if (def.type === 'glow') {                                  // свечение: все настройки обеих вкладок
+  if (def.type === 'glow') {
     const o = {};
     GLOW_T.forEach((t) => {
       const k = (x) => 'glow' + t.k + x;
@@ -1340,12 +1273,12 @@ function randomValue(def, hue) {
   if (def.type === 'toggle') return Math.random() < 0.5;
   if (def.type === 'segment') return Math.floor(Math.random() * def.options.length);
   if (def.type === 'color') return hue ? randomHueColor() : randomAnyColor();
-  if (def.type === 'paint') {                                 // режим (цвет / градиент / редактор) + все цвета и точки
+  if (def.type === 'paint') {
     const st = randomStops(hue);
-    const rc = () => (hue ? randomHueColor() : randomAnyColor());
-    return { mode: Math.floor(Math.random() * 3), c1: rc(), c2: rc(), stops: st.stops, smooth: st.smooth, edited: true };
+    const ends = [...st.stops].sort((a, b) => a.pos - b.pos);
+    return { mode: Math.floor(Math.random() * 3), c1: ends[0].color, c2: ends[ends.length - 1].color, stops: st.stops, smooth: st.smooth, edited: true, ballStart: false };
   }
-  return randomStops(hue);                                    // gradient
+  return randomStops(hue);
 }
 
 function initialValue(def) {
@@ -1359,6 +1292,7 @@ function initialValue(def) {
     return {
       mode: !INITIAL[q.grad] ? 0 : !INITIAL[q.adv] ? 1 : 2, c1: INITIAL[q.c1], c2: INITIAL[q.c2],
       stops: JSON.parse(JSON.stringify(INITIAL[q.stops])), smooth: INITIAL[q.smooth], edited: false,
+      ballStart: q.ballStart ? INITIAL[q.ballStart] : false,
     };
   }
   if (def.type === 'gradient') {
@@ -1367,18 +1301,355 @@ function initialValue(def) {
   return INITIAL[def.key];
 }
 
-// ── Редактор градиента (точки можно добавлять, двигать и удалять) ──
+const CP_PALETTE = [
+  '#ffffff', '#d4d7de', '#8d92a0', '#3a3d46', '#000000',
+  '#ff4d4d', '#ff7a3d', '#ffb938', '#ffe14d', '#c6f04d',
+  '#58e06a', '#2fd6a0', '#35d4e6', '#4da3ff', '#6a73ff',
+  '#9a5bff', '#d65bff', '#ff5bb4', '#ff8fa3', '#8b5e3c',
+];
+const CP_RECENT_KEY = 'asmr-recent-colors-v1';
+const CP_RECENT_MAX = 10;
+let cpRecent = [];
+try {
+  const raw = JSON.parse(localStorage.getItem(CP_RECENT_KEY) || '[]');
+  if (Array.isArray(raw)) cpRecent = raw.filter((c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)).map((c) => c.toLowerCase()).slice(0, CP_RECENT_MAX);
+} catch (_) {}
+
+function cpPushRecent(hex) {
+  hex = hex.toLowerCase();
+  if (CP_PALETTE.includes(hex)) return;
+  cpRecent = [hex, ...cpRecent.filter((c) => c !== hex)].slice(0, CP_RECENT_MAX);
+  try { localStorage.setItem(CP_RECENT_KEY, JSON.stringify(cpRecent)); } catch (_) {}
+}
+
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), d = mx - Math.min(r, g, b);
+  let h = 0;
+  if (d) {
+    if (mx === r) h = ((g - b) / d) % 6;
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { h, s: mx ? d / mx : 0, v: mx };
+}
+function hsvToHex(h, s, v) {
+  const c = v * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = v - c;
+  const t = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(h / 60) % 6];
+  return rgbToHex(t.map((u) => (u + m) * 255));
+}
+function normHex(str) {
+  let t = String(str).trim().replace(/^#/, '');
+  if (/^[0-9a-f]{3}$/i.test(t)) t = t.split('').map((ch) => ch + ch).join('');
+  return /^[0-9a-f]{6}$/i.test(t) ? '#' + t.toLowerCase() : null;
+}
+
+document.head.appendChild(Object.assign(document.createElement('style'), { textContent: `
+.cswatch{flex:none;width:56px;height:44px;padding:4px;box-sizing:border-box;border:1px solid var(--line2);border-radius:9px;background:var(--surface2);cursor:pointer}
+.cswatch span{display:block;width:100%;height:100%;border-radius:6px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
+.cswatch[aria-expanded=true]{border-color:var(--accent)}
+.asmr-modal.cp-overlay{z-index:60}
+.asmr-modal .box.cpop{width:min(360px,100%);padding:14px 14px 12px;max-height:min(88vh,680px);max-height:min(88dvh,680px);outline:none;-webkit-user-select:none;user-select:none}
+@media (pointer:coarse){.cp-grid button{height:40px}}
+.cp-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.cp-cur{flex:none;width:30px;height:30px;border-radius:9px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}
+.cp-title{flex:1;min-width:0;font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cp-x{flex:none;width:34px;height:34px;display:grid;place-items:center;border:0;border-radius:9px;background:none;color:var(--muted);cursor:pointer}
+.cp-x:active{background:var(--surface2);color:var(--text)}
+.cp-lab{margin:8px 2px 5px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.cp-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
+.cp-grid button{height:34px;padding:0;border:2px solid transparent;border-radius:10px;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.18);transition:transform .12s ease}
+.cp-grid button:active{transform:scale(.92)}
+.cp-grid button.on{border-color:var(--accent)}
+.cp-more{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:10px;min-height:42px;border:1px solid var(--line2);border-radius:12px;background:none;color:var(--text);font:500 13px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;cursor:pointer}
+.cp-more:active{background:var(--surface2)}
+.cp-more svg{transition:transform .3s ease}
+.cp-more[aria-expanded=true] svg{transform:rotate(180deg)}
+.cp-ext{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .32s ease,opacity .25s ease}
+.cp-ext.open{grid-template-rows:1fr;opacity:1}
+.cp-ext-in{overflow:hidden;min-height:0}
+.cp-ext-pad{display:flex;flex-direction:column;gap:12px;padding:14px 2px 2px}
+.cp-wheel{position:relative;align-self:center;width:176px;height:176px;border-radius:50%;touch-action:none;cursor:crosshair;
+  background:radial-gradient(circle closest-side,#fff,rgba(255,255,255,0)),conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+.cp-wheel::after{content:"";position:absolute;inset:0;border-radius:50%;background:#000;opacity:var(--dark,0);pointer-events:none}
+.cp-dot{position:absolute;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;border:3px solid #fff;box-sizing:border-box;box-shadow:0 0 0 1px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.5);pointer-events:none;z-index:1}
+.cp-sh{display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;color:var(--muted)}
+.cp-sh b{font-weight:500;color:var(--text);font-variant-numeric:tabular-nums}
+.cp-track{position:relative;height:22px;border-radius:11px;touch-action:none;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}
+.cp-track:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cp-thumb{position:absolute;top:50%;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;border:3px solid #fff;box-sizing:border-box;box-shadow:0 0 0 1px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.5);pointer-events:none}
+.cp-hexrow{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}
+.cp-hexrow span{flex:1}
+.cp-hex{flex:none;width:112px;height:40px;box-sizing:border-box;padding:0 10px;border:1px solid var(--line2);border-radius:10px;background:var(--bg);color:var(--text);
+  font:500 16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;text-transform:uppercase;-webkit-user-select:text;user-select:text}
+.cp-hex:focus{outline:none;border-color:var(--accent)}
+@media (prefers-reduced-motion:reduce){.cpop,.cpop *{transition:none!important}}
+` }));
+
+function cpSlider(label, max, fmt, onInput, onEnd) {
+  const node = el('div', 'cp-sl');
+  const head = el('div', 'cp-sh');
+  const lab = el('span', '', { textContent: label });
+  const val = el('b');
+  head.append(lab, val);
+  const track = el('div', 'cp-track');
+  const thumb = el('div', 'cp-thumb');
+  track.appendChild(thumb);
+  track.tabIndex = 0;
+  track.setAttribute('role', 'slider');
+  track.setAttribute('aria-label', label);
+  track.setAttribute('aria-valuemin', 0);
+  track.setAttribute('aria-valuemax', max);
+  node.append(head, track);
+  let v = 0, drag = null;
+  const draw = () => {
+    thumb.style.left = (v / max) * 100 + '%';
+    val.textContent = fmt(v);
+    track.setAttribute('aria-valuenow', Math.round(v));
+  };
+  const fromX = (x) => {
+    const r = track.getBoundingClientRect();
+    return Math.min(max, Math.max(0, ((x - r.left) / r.width) * max));
+  };
+  track.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    drag = e.pointerId;
+    try { track.setPointerCapture(e.pointerId); } catch (_) {}
+    v = fromX(e.clientX); draw(); onInput(v);
+    e.preventDefault();
+  });
+  track.addEventListener('pointermove', (e) => { if (drag === e.pointerId) { v = fromX(e.clientX); draw(); onInput(v); } });
+  const end = (e) => { if (drag === e.pointerId) { drag = null; onEnd(); } };
+  track.addEventListener('pointerup', end);
+  track.addEventListener('pointercancel', end);
+  track.addEventListener('keydown', (e) => {
+    const d = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1, PageUp: 10, PageDown: -10 }[e.key];
+    if (!d) return;
+    v = Math.min(max, Math.max(0, v + (d * max) / 100)); draw(); onInput(v);
+    e.preventDefault();
+  });
+  track.addEventListener('keyup', (e) => { if (e.key.startsWith('Arrow') || e.key.startsWith('Page')) onEnd(); });
+  return { node, set: (x) => { v = x; draw(); }, setBg: (css) => { track.style.background = css; } };
+}
+
+const cp = (() => {
+  const overlay = el('div', 'asmr-modal cp-overlay');
+  overlay.setAttribute('aria-hidden', 'true');
+  const pop = el('div', 'box cpop');
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', 'Выбор цвета');
+  pop.tabIndex = -1;
+
+  const curSw = el('div', 'cp-cur');
+  const title = el('div', 'cp-title', { textContent: 'Цвет' });
+  const closeBtn = el('button', 'cp-x', { type: 'button', title: 'Закрыть' });
+  closeBtn.setAttribute('aria-label', 'Закрыть');
+  closeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+  pop.appendChild(Object.assign(el('div', 'cp-top'), {})).append(curSw, title, closeBtn);
+
+  const palGrid = el('div', 'cp-grid');
+  const recLab = el('div', 'cp-lab', { textContent: 'Недавно использованные' });
+  const recGrid = el('div', 'cp-grid');
+  pop.append(el('div', 'cp-lab', { textContent: 'Готовые цвета' }), palGrid, recLab, recGrid);
+
+  const moreBtn = el('button', 'cp-more', { type: 'button' });
+  moreBtn.setAttribute('aria-expanded', 'false');
+  moreBtn.innerHTML = '<span>Точная настройка</span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+  const ext = el('div', 'cp-ext');
+  const extIn = el('div', 'cp-ext-in');
+  const pad = el('div', 'cp-ext-pad');
+  const wheel = el('div', 'cp-wheel');
+  const dot = el('div', 'cp-dot');
+  wheel.appendChild(dot);
+  const hueSl = cpSlider('Оттенок', 360, (v) => Math.round(v) + '°', (v) => { st.h = Math.min(359.99, v); apply(); }, commitRecent);
+  const satSl = cpSlider('Насыщенность', 100, (v) => Math.round(v) + '%', (v) => { st.s = v / 100; apply(); }, commitRecent);
+  const valSl = cpSlider('Яркость', 100, (v) => Math.round(v) + '%', (v) => { st.v = v / 100; apply(); }, commitRecent);
+  const hexRow = el('label', 'cp-hexrow');
+  const hexIn = el('input', 'cp-hex', { type: 'text', maxLength: 7 });
+  hexIn.setAttribute('autocomplete', 'off');
+  hexIn.setAttribute('autocapitalize', 'off');
+  hexIn.spellcheck = false;
+  hexRow.append(el('span', '', { textContent: 'Код цвета (HEX)' }), hexIn);
+  pad.append(wheel, hueSl.node, satSl.node, valSl.node, hexRow);
+  extIn.appendChild(pad);
+  ext.appendChild(extIn);
+  pop.append(moreBtn, ext);
+  overlay.appendChild(pop);
+  document.body.appendChild(overlay);
+
+  let anchor = null, cb = null, st = { h: 0, s: 1, v: 1 }, cur = '#000000', isOpen = false, hideT = 0, extOpen = false;
+
+  function commitRecent() { cpPushRecent(cur); renderPalette(); }
+
+  function swatchBtn(hex) {
+    const b = el('button', hex === cur ? 'on' : '', { type: 'button', title: hex.toUpperCase() });
+    b.style.background = hex;
+    b.setAttribute('aria-label', 'Цвет ' + hex.toUpperCase());
+    b.addEventListener('click', () => { setHex(hex); cpPushRecent(hex); renderPalette(); if (cb) cb(hex); });
+    return b;
+  }
+  function renderPalette() {
+    palGrid.replaceChildren(...CP_PALETTE.map(swatchBtn));
+    recGrid.replaceChildren(...cpRecent.map(swatchBtn));
+    recLab.style.display = recGrid.style.display = cpRecent.length ? '' : 'none';
+  }
+
+  function paintUi() {
+    cur = hsvToHex(st.h, st.s, st.v);
+    curSw.style.background = cur;
+    const R = wheel.clientWidth / 2 || 88;
+    const ang = (st.h * Math.PI) / 180;
+    dot.style.left = R + Math.sin(ang) * st.s * R + 'px';
+    dot.style.top = R - Math.cos(ang) * st.s * R + 'px';
+    dot.style.background = cur;
+    wheel.style.setProperty('--dark', String(1 - st.v));
+    hueSl.set(st.h); satSl.set(st.s * 100); valSl.set(st.v * 100);
+    hueSl.setBg('linear-gradient(90deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)');
+    satSl.setBg(`linear-gradient(90deg,${hsvToHex(st.h, 0, st.v)},${hsvToHex(st.h, 1, st.v)})`);
+    valSl.setBg(`linear-gradient(90deg,#000,${hsvToHex(st.h, st.s, 1)})`);
+    if (document.activeElement !== hexIn) hexIn.value = cur.toUpperCase();
+    [palGrid, recGrid].forEach((g) => [...g.children].forEach((b) => b.classList.toggle('on', b.title.toLowerCase() === cur)));
+  }
+  function apply() { paintUi(); if (cb) cb(cur); }
+  function setHex(hex) {
+    const c = hexToRgb(hex);
+    const n = rgbToHsv(c[0], c[1], c[2]);
+    st = { h: n.s === 0 || n.v === 0 ? st.h : n.h, s: n.s, v: n.v };
+    paintUi();
+  }
+
+  let wDrag = null;
+  const wheelAt = (e) => {
+    const r = wheel.getBoundingClientRect(), R = r.width / 2;
+    const dx = e.clientX - (r.left + R), dy = e.clientY - (r.top + R);
+    st.h = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
+    st.s = Math.min(1, Math.hypot(dx, dy) / R);
+    apply();
+  };
+  wheel.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    wDrag = e.pointerId;
+    try { wheel.setPointerCapture(e.pointerId); } catch (_) {}
+    wheelAt(e);
+    e.preventDefault();
+  });
+  wheel.addEventListener('pointermove', (e) => { if (wDrag === e.pointerId) wheelAt(e); });
+  const wEnd = (e) => { if (wDrag === e.pointerId) { wDrag = null; commitRecent(); } };
+  wheel.addEventListener('pointerup', wEnd);
+  wheel.addEventListener('pointercancel', wEnd);
+
+  const hexCommit = () => {
+    const h = normHex(hexIn.value);
+    if (h) { setHex(h); commitRecent(); if (cb) cb(cur); }
+    hexIn.value = cur.toUpperCase();
+  };
+  hexIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); hexIn.blur(); } });
+  hexIn.addEventListener('blur', hexCommit);
+  hexIn.addEventListener('input', () => { const h = normHex(hexIn.value); if (h) { setHex(h); if (cb) cb(cur); } });
+
+  function setExt(v) {
+    extOpen = v;
+    ext.classList.toggle('open', v);
+    ext.inert = !v;
+    moreBtn.setAttribute('aria-expanded', String(v));
+    moreBtn.firstChild.textContent = v ? 'Свернуть' : 'Точная настройка';
+    if (v) requestAnimationFrame(paintUi);
+  }
+  moreBtn.addEventListener('click', () => setExt(!extOpen));
+
+  ext.inert = true;
+
+  function open(a, hex, onChange, label) {
+    if (anchor && anchor !== a) anchor.setAttribute('aria-expanded', 'false');
+    anchor = a; cb = null;
+    anchor.setAttribute('aria-expanded', 'true');
+    title.textContent = label || 'Цвет';
+    setHex(normHex(hex) || '#ffffff');
+    renderPalette();
+    isOpen = true;
+    pop.scrollTop = 0;
+    menu.inert = true;
+    overlay.setAttribute('aria-hidden', 'false');
+    overlay.classList.add('open');
+    cb = onChange;
+    requestAnimationFrame(paintUi);
+    try { pop.focus({ preventScroll: true }); } catch (_) {}
+  }
+  function close(restoreFocus) {
+    if (!isOpen) return;
+    isOpen = false;
+    const a = anchor;
+    cb = null;
+    if (a) a.setAttribute('aria-expanded', 'false');
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+    menu.inert = false;
+    setExt(false);
+    if (restoreFocus && a) { try { a.focus({ preventScroll: true }); } catch (_) {} }
+    anchor = null;
+  }
+  closeBtn.addEventListener('click', () => close(true));
+
+  let downOnBackdrop = false;
+  overlay.addEventListener('pointerdown', (e) => { downOnBackdrop = e.target === overlay; });
+  overlay.addEventListener('click', (e) => { if (downOnBackdrop && e.target === overlay) close(true); downOnBackdrop = false; });
+
+  const trap = (e) => {
+    const f = [...pop.querySelectorAll('button,input,[tabindex="0"]')].filter((n) => !n.disabled && !n.closest('[inert]') && n.offsetParent !== null);
+    if (!f.length) { e.preventDefault(); return; }
+    const first = f[0], last = f[f.length - 1], act = document.activeElement;
+    if (!pop.contains(act) || act === pop) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+    else if (e.shiftKey && act === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && act === last) { e.preventDefault(); first.focus(); }
+  };
+  window.addEventListener('keydown', (e) => {
+    if (!isOpen) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); close(true); }
+    else if (e.key === 'Tab') trap(e);
+  }, true);
+  new MutationObserver(() => { if (menu.style.display === 'none') close(false); }).observe(menu, { attributes: true, attributeFilter: ['style'] });
+
+  return {
+    open, close,
+    isOpenFor: (a) => isOpen && anchor === a,
+    sync: (hex) => { if (isOpen && normHex(hex) && hex.toLowerCase() !== cur) { setHex(hex); } },
+  };
+})();
+
+function makeColorButton(initial, onChange, label) {
+  const node = el('button', 'cswatch', { type: 'button' });
+  const fill = el('span');
+  node.appendChild(fill);
+  node.setAttribute('aria-haspopup', 'dialog');
+  node.setAttribute('aria-expanded', 'false');
+  let val = initial;
+  const paint = () => {
+    fill.style.background = val;
+    node.setAttribute('aria-label', `${label || 'Цвет'}: ${String(val).toUpperCase()}. Выбрать цвет`);
+    node.title = String(val).toUpperCase();
+  };
+  node.addEventListener('click', () => {
+    if (cp.isOpenFor(node)) { cp.close(true); return; }
+    cp.open(node, val, (hex) => { val = hex; paint(); onChange(hex); }, label);
+  });
+  paint();
+  return { node, set: (v) => { val = v; paint(); cp.sync(v); } };
+}
+
 const MAX_STOPS = 16;
 
-function buildGradientEditor(onChange, K) {
+function buildGradientEditor(onChange, K, onSelect) {
   const wrap = el('div', 'gbody');
   const bar = el('div', 'gbar');
   const track = el('div', 'gtrack');
 
   const info = el('div', 'ginfo');
   const infoText = el('span');
-  const picker = el('input', '', { type: 'color' });
-  info.append(infoText, picker);
+  const picker = makeColorButton('#000000', (v) => { selected.color = v; updateVisuals(); changed(); }, 'Цвет точки');
+  info.append(infoText, picker.node);
 
   const btns = el('div', 'gbtns');
   const addBtn = el('button', '', { type: 'button', textContent: '+ Добавить точку' });
@@ -1387,14 +1658,14 @@ function buildGradientEditor(onChange, K) {
 
   const smoothRow = el('div', 'gsmooth');
   const smoothLabel = el('label', '', { htmlFor: 'f-' + K.smooth, textContent: 'Плавный градиент' });
-  smoothLabel.appendChild(el('small', '', { textContent: 'выключено — «классика»: цвета без перехода' }));
   const smoothInput = el('input', 'switch', { id: 'f-' + K.smooth, type: 'checkbox' });
   smoothRow.append(smoothLabel, smoothInput);
+  switchSyncs.push(() => { smoothInput.checked = !!settings[K.smooth]; });
 
   wrap.append(bar, track, info, btns, smoothRow);
 
   let selected = null;
-  let handles = [];                                          // [{ stop, node }]
+  let handles = [];
   const stops = () => settings[K.stops];
   const sorted = () => [...stops()].sort((a, b) => a.pos - b.pos);
   const changed = () => { settings[K.edited] = true; onChange(); };
@@ -1407,8 +1678,9 @@ function buildGradientEditor(onChange, K) {
       node.classList.toggle('sel', stop === selected);
     });
     const order = sorted();
-    infoText.textContent = `Точка ${order.indexOf(selected) + 1}/${order.length} · Позиция ${Math.round(selected.pos * 100)}% · ${selected.color.toUpperCase()}`;
-    picker.value = selected.color;
+    infoText.textContent = `Точка ${order.indexOf(selected) + 1} из ${order.length} · положение ${Math.round(selected.pos * 100)}% · ${selected.color.toUpperCase()}`;
+    picker.set(selected.color);
+    if (onSelect) onSelect(selected === order[0]);
     smoothInput.checked = settings[K.smooth];
     delBtn.disabled = stops().length <= 2;
     addBtn.disabled = stops().length >= MAX_STOPS;
@@ -1424,7 +1696,7 @@ function buildGradientEditor(onChange, K) {
         e.preventDefault();
         selected = stop;
         dragging = true;
-        try { node.setPointerCapture(e.pointerId); } catch (_) { /* не критично */ }
+        try { node.setPointerCapture(e.pointerId); } catch (_) {}
         updateVisuals();
       });
       node.addEventListener('pointermove', (e) => {
@@ -1443,17 +1715,11 @@ function buildGradientEditor(onChange, K) {
     updateVisuals();
   }
 
-  picker.addEventListener('input', () => {
-    selected.color = picker.value;
-    updateVisuals();
-    changed();
-  });
-
   addBtn.addEventListener('click', () => {
     if (stops().length >= MAX_STOPS) return;
     const st = sorted();
     const pts = [0, ...st.map((x) => x.pos), 1];
-    let best = { gap: -1, pos: 0.5 };                        // середина самого большого промежутка
+    let best = { gap: -1, pos: 0.5 };
     for (let i = 0; i < pts.length - 1; i++) {
       const gap = pts[i + 1] - pts[i];
       if (gap > best.gap) best = { gap, pos: (pts[i] + pts[i + 1]) / 2 };
@@ -1482,7 +1748,6 @@ function buildGradientEditor(onChange, K) {
     changed();
   });
 
-  // v = { stops, smooth, edited }
   function set(v) {
     settings[K.stops] = JSON.parse(JSON.stringify(v.stops));
     settings[K.smooth] = v.smooth;
@@ -1496,21 +1761,24 @@ function buildGradientEditor(onChange, K) {
   return { node: wrap, set };
 }
 
-// ── Строки настроек ──
-const controls = {};     // key → { row, set(v) }
-const visibles = [];     // строки, показываемые по условию
+const controls = {};
+const visibles = [];
+const switchSyncs = [];
+
+function syncSwitches() { switchSyncs.forEach((f) => f()); }
 
 function refreshVisibility() {
   visibles.forEach((v) => { v.row.style.display = v.fn(settings) ? '' : 'none'; });
+  syncSwitches();
+  const tp = controls.trailPaint;
+  if (tp && tp.refresh) tp.refresh();
 }
 
-// Любое изменение значения: обновить видимость зависимых строк и превью
 function commit(key) {
   refreshVisibility();
   activate(controls[key].row, key, true);
 }
 
-// ── Значки кнопок строки (однотонные, без эмодзи) ──
 const SVG_ATTR = 'viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
 const ICONS = {
   reset: `<svg ${SVG_ATTR}><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4v5h5"/></svg>`,
@@ -1521,10 +1789,6 @@ const ICONS = {
   more: `<svg ${SVG_ATTR}><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg>`,
 };
 
-// ── Ползунок значения ──
-// Не нативный <input type=range>: у него пальцем нельзя отличить «листаю страницу» от «двигаю ползунок».
-// Здесь вертикальное движение пальца — это прокрутка страницы (touch-action: pan-y), а значение меняется только
-// после явного горизонтального сдвига. Касание дорожки значение не меняет — случайно сбить настройку нельзя.
 function buildSlider(def, value, labelId, onInput) {
   const node = el('div', 'sl');
   const inner = el('div', 'sl-in');
@@ -1560,25 +1824,25 @@ function buildSlider(def, value, labelId, onInput) {
 
   let g = null;
   node.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'mouse') {                       // мышь: ползунок прыгает под курсор и тянется как обычно
+    if (e.pointerType === 'mouse') {
       if (e.button !== 0) return;
       g = { id: e.pointerId, mode: 'abs' };
-      try { node.setPointerCapture(e.pointerId); } catch (_) { /* не критично */ }
+      try { node.setPointerCapture(e.pointerId); } catch (_) {}
       node.classList.add('drag');
       apply(xToValue(e.clientX));
       return;
     }
-    g = { id: e.pointerId, mode: 'wait', x: e.clientX, y: e.clientY, v: cur };   // палец: сначала ждём, куда он поедет
+    g = { id: e.pointerId, mode: 'wait', x: e.clientX, y: e.clientY, v: cur };
   });
   node.addEventListener('pointermove', (e) => {
     if (!g || e.pointerId !== g.id) return;
     if (g.mode === 'abs') { apply(xToValue(e.clientX)); return; }
     if (g.mode === 'wait') {
       const dx = e.clientX - g.x, dy = e.clientY - g.y;
-      if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) { g = null; return; }   // это прокрутка страницы
+      if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) { g = null; return; }
       if (Math.abs(dx) < 6) return;
-      g.mode = 'rel'; g.x = e.clientX; g.v = cur;          // значение двигаем от текущего — без рывка в момент захвата
-      node.classList.add('drag');                          // (у касания захват указателя и так неявный — явный не нужен)
+      g.mode = 'rel'; g.x = e.clientX; g.v = cur;
+      node.classList.add('drag');
     }
     apply(g.v + ((e.clientX - g.x) / inner.getBoundingClientRect().width) * span);
   });
@@ -1597,7 +1861,6 @@ function buildSlider(def, value, labelId, onInput) {
   return { node, set, apply };
 }
 
-// ── Трёхпозиционный переключатель («ползунок» с тремя положениями) ──
 function buildSegment(labels, index, onChange) {
   const node = el('div', 'seg');
   node.tabIndex = 0;
@@ -1608,7 +1871,7 @@ function buildSegment(labels, index, onChange) {
   node.appendChild(thumb);
   const spans = labels.map((t) => node.appendChild(el('span', '', { textContent: t })));
   const n = labels.length;
-  node.style.gridTemplateColumns = `repeat(${n},1fr)`;            // позиций может быть не три (например, две)
+  node.style.gridTemplateColumns = `repeat(${n},1fr)`;
   thumb.style.width = `calc((100% - 6px)/${n})`;
   let idx = index;
   const draw = (pos, animate) => {
@@ -1635,16 +1898,16 @@ function buildSegment(labels, index, onChange) {
     if (!g || e.pointerId !== g.id) return;
     if (!g.drag) {
       const dx = e.clientX - g.x, dy = e.clientY - g.y;
-      if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) { g = null; return; }   // это прокрутка страницы
+      if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) { g = null; return; }
       if (Math.abs(dx) < 4) return;
       g.drag = true;
     }
-    draw(posAt(e.clientX), false);                         // бегунок едет за пальцем
+    draw(posAt(e.clientX), false);
   });
   node.addEventListener('pointerup', (e) => {
     if (!g || e.pointerId !== g.id) return;
     g = null;
-    choose(Math.round(posAt(e.clientX)));                  // тап по трети или отпускание после перетаскивания — прилипаем к ближайшему
+    choose(Math.round(posAt(e.clientX)));
   });
   const cancel = (e) => { if (g && e.pointerId === g.id) { g = null; draw(idx, true); } };
   node.addEventListener('pointercancel', cancel);
@@ -1657,7 +1920,6 @@ function buildSegment(labels, index, onChange) {
   return { node, set: (i) => { idx = i; draw(i, true); } };
 }
 
-// ── Свечение: одна карточка, две вкладки («Кольца» / «Шарик»), под каждой — выключатель и настройки ──
 const GLOW_OP = { min: 0.05, max: 1, step: 0.05, fmt: (v) => Math.round(v * 100) + '%' };
 const GLOW_T = [
   { k: 'Ring', name: 'Кольца', size: { min: 1.5, max: 20, step: 0.5, fmt: (v) => '×' + v.toFixed(1) } },
@@ -1694,22 +1956,20 @@ function buildGlow(def) {
       wrap.append(head, sl.node);
       return { node: wrap, set: (v) => { settings[key(x)] = v; sl.set(v); val.textContent = d.fmt(v); } };
     };
-    const opacity = slider('Opacity', 'Прозрачность', GLOW_OP);
+    const opacity = slider('Opacity', 'Яркость', GLOW_OP);
     const size = slider('Size', 'Размер', t.size);
 
     const cuId = 'f-glow-cu-' + t.k;
     const cuLine = el('div', 'glow-line');
-    const colorIn = el('input', '', { type: 'color', value: settings[key('Color')] });
-    colorIn.setAttribute('aria-label', 'Цвет свечения');
+    const colorIn = makeColorButton(settings[key('Color')], (v) => { settings[key('Color')] = v; commit(def.key); }, 'Цвет свечения');
     const cuSw = el('input', 'switch', { id: cuId, type: 'checkbox' });
-    cuLine.append(el('label', '', { htmlFor: cuId, textContent: 'Свой цвет' }), colorIn, cuSw);
+    cuLine.append(el('label', '', { htmlFor: cuId, textContent: 'Свой цвет' }), colorIn.node, cuSw);
 
     body.append(mode.node, opacity.node, size.node, cuLine);
     box.append(onLine, body);
 
     onSw.addEventListener('change', () => { settings[key('')] = onSw.checked; body.style.display = onSw.checked ? '' : 'none'; commit(def.key); });
-    cuSw.addEventListener('change', () => { settings[key('Custom')] = cuSw.checked; colorIn.style.display = cuSw.checked ? '' : 'none'; commit(def.key); });
-    colorIn.addEventListener('input', () => { settings[key('Color')] = colorIn.value; commit(def.key); });
+    cuSw.addEventListener('change', () => { settings[key('Custom')] = cuSw.checked; colorIn.node.style.display = cuSw.checked ? '' : 'none'; commit(def.key); });
 
     const sync = () => {
       onSw.checked = !!settings[key('')];
@@ -1718,9 +1978,15 @@ function buildGlow(def) {
       opacity.set(settings[key('Opacity')]);
       size.set(settings[key('Size')]);
       cuSw.checked = !!settings[key('Custom')];
-      colorIn.value = settings[key('Color')];
-      colorIn.style.display = cuSw.checked ? '' : 'none';
+      colorIn.set(settings[key('Color')]);
+      colorIn.node.style.display = cuSw.checked ? '' : 'none';
     };
+    switchSyncs.push(() => {
+      onSw.checked = !!settings[key('')];
+      body.style.display = onSw.checked ? '' : 'none';
+      cuSw.checked = !!settings[key('Custom')];
+      colorIn.node.style.display = cuSw.checked ? '' : 'none';
+    });
     node.appendChild(box);
     return { box, sync };
   });
@@ -1731,57 +1997,129 @@ function buildGlow(def) {
   return { node, set: (v) => { GLOW_KEYS.forEach((k) => { if (v && k in v) settings[k] = v[k]; }); syncAll(); } };
 }
 
-// ── Цвет: один переключатель вместо цепочки тумблеров. 0 — простой цвет, 1 — простой градиент, 2 — полный редактор ──
 function buildPaint(def) {
   const q = def.p;
   const getMode = () => (!settings[q.grad] ? 0 : !settings[q.adv] ? 1 : 2);
   const wrap = el('div', 'paint');
-  const c1 = el('input', '', { type: 'color', value: settings[q.c1] });
-  const c2 = el('input', '', { type: 'color', value: settings[q.c2] });
+  const c1 = makeColorButton(settings[q.c1], (v) => {
+    settings[q.c1] = v;
+    if (hasBS && settings[q.ballStart] && !sameColor(v, settings.ballColor)) { settings[q.ballStart] = false; syncBs(); }
+    show();
+    commit(def.key);
+  }, 'Первый цвет');
+  const c2 = makeColorButton(settings[q.c2], (v) => { settings[q.c2] = v; show(); commit(def.key); }, 'Второй цвет');
   const bar = el('div', 'pbar');
   const cols = el('div', 'pcols');
-  cols.append(c1, bar, c2);
-  const editor = buildGradientEditor(() => commit(def.key), { stops: q.stops, smooth: q.smooth, edited: q.edited });
-  const seg = buildSegment(['Цвет', 'Градиент', 'Редактор'], getMode(), (m) => setMode(m, true));
-  wrap.append(seg.node, cols, editor.node);
+  cols.append(c1.node, bar, c2.node);
+
+  const hasBS = !!q.ballStart;
+  const mkBs = (suffix) => {
+    const row = el('div', 'pball');
+    const id = `f-${q.ballStart}-${suffix}`;
+    const input = el('input', 'switch', { id, type: 'checkbox' });
+    row.append(el('label', '', { htmlFor: id, textContent: 'Начало следа — цвет шарика' }), input);
+    input.addEventListener('change', () => setBallStart(input.checked));
+    return { row, input };
+  };
+  const bsGrad = hasBS ? mkBs('g') : null;
+  const bsEdit = hasBS ? mkBs('e') : null;
+  let editorFirst = true;
+  const sameColor = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+  function syncBs() {
+    if (!hasBS) return;
+    bsGrad.input.checked = bsEdit.input.checked = !!settings[q.ballStart];
+  }
+  if (hasBS) switchSyncs.push(syncBs);
+
+  const editor = buildGradientEditor(() => {
+    if (hasBS && settings[q.ballStart] && !sameColor(sortedStops()[0].color, settings.ballColor)) {
+      settings[q.ballStart] = false;
+      syncBs();
+    }
+    commit(def.key);
+  }, { stops: q.stops, smooth: q.smooth, edited: q.edited }, (isFirst) => {
+    editorFirst = isFirst;
+    if (hasBS) bsEdit.row.style.display = getMode() === 2 && isFirst ? '' : 'none';
+  });
+  const seg = buildSegment(['Один цвет', 'Градиент', 'Свой градиент'], getMode(), (m) => setMode(m, true));
+  wrap.append(seg.node, cols);
+  if (hasBS) wrap.append(bsGrad.row);
+  wrap.appendChild(editor.node);
+  if (hasBS) wrap.appendChild(bsEdit.row);
 
   function show() {
     const m = getMode();
     cols.style.display = m === 2 ? 'none' : 'flex';
-    bar.style.display = c2.style.display = m === 1 ? '' : 'none';
-    c1.classList.toggle('wide', m === 0);
+    bar.style.display = c2.node.style.display = m === 1 ? '' : 'none';
+    c1.node.classList.toggle('wide', m === 0);
     editor.node.style.display = m === 2 ? '' : 'none';
+    if (hasBS) {
+      bsGrad.row.style.display = m === 1 ? '' : 'none';
+      bsEdit.row.style.display = m === 2 && editorFirst ? '' : 'none';
+    }
     bar.style.background = gradientCss([{ pos: 0, color: settings[q.c1] }, { pos: 1, color: settings[q.c2] }], true);
   }
+  const sortedStops = () => [...settings[q.stops]].sort((a, b) => a.pos - b.pos);
+  function endsFromStops() {
+    const st = sortedStops();
+    settings[q.c1] = st[0].color;
+    settings[q.c2] = st[st.length - 1].color;
+    c1.set(settings[q.c1]);
+    c2.set(settings[q.c2]);
+  }
+  function stopsFromEnds() {
+    const st = JSON.parse(JSON.stringify(sortedStops()));
+    st[0].color = settings[q.c1];
+    st[st.length - 1].color = settings[q.c2];
+    editor.set({ stops: st, smooth: settings[q.smooth], edited: settings[q.edited] });
+  }
   function setMode(m, user) {
+    const prev = getMode();
+    if (user && prev !== m) {
+      if (prev === 2) endsFromStops();
+      else if (m === 2) {
+        if (!settings[q.edited]) editor.set({ stops: [{ pos: 0, color: settings[q.c1] }, { pos: 1, color: settings[q.c2] }], smooth: true, edited: false });
+        else if (prev === 1) stopsFromEnds();
+      }
+    }
     settings[q.grad] = m >= 1;
     settings[q.adv] = m === 2;
-    // впервые открыли редактор — точки берём из текущих двух цветов
-    if (m === 2 && !settings[q.edited]) {
-      editor.set({ stops: [{ pos: 0, color: settings[q.c1] }, { pos: 1, color: settings[q.c2] }], smooth: true, edited: false });
-    }
     show();
     if (user) commit(def.key);
   }
-  c1.addEventListener('input', () => { settings[q.c1] = c1.value; show(); commit(def.key); });
-  c2.addEventListener('input', () => { settings[q.c2] = c2.value; show(); commit(def.key); });
+  function applyBallStart() {
+    if (!hasBS || !settings[q.ballStart]) return;
+    const bc = settings.ballColor;
+    if (!sameColor(settings[q.c1], bc)) { settings[q.c1] = bc; c1.set(bc); show(); }
+    const cl = JSON.parse(JSON.stringify(settings[q.stops]));
+    const first = [...cl].sort((a, b) => a.pos - b.pos)[0];
+    if (!sameColor(first.color, bc)) {
+      first.color = bc;
+      editor.set({ stops: cl, smooth: settings[q.smooth], edited: settings[q.edited] });
+    }
+  }
+  function setBallStart(v) {
+    settings[q.ballStart] = v;
+    syncBs();
+    if (v) applyBallStart();
+    commit(def.key);
+  }
   show();
+  syncBs();
 
-  // v = { mode, c1, c2, stops, smooth, edited }
   const set = (v) => {
     settings[q.c1] = v.c1; settings[q.c2] = v.c2;
-    c1.value = v.c1; c2.value = v.c2;
+    c1.set(v.c1); c2.set(v.c2);
     editor.set({ stops: v.stops, smooth: v.smooth, edited: v.edited });
     settings[q.grad] = v.mode >= 1;
     settings[q.adv] = v.mode === 2;
+    if (hasBS) { settings[q.ballStart] = !!v.ballStart; syncBs(); }
     seg.set(v.mode);
     show();
   };
-  return { node: wrap, set };
+  return { node: wrap, set, refresh: applyBallStart };
 }
 
-// ── Окно с описанием настройки (кнопка «i» на карточке) ──
-// Появляется по центру экрана; всё остальное, пока оно открыто, затемняется и размывается. Закрыть: крестик, клик мимо или Esc.
 const infoEl = el('div', 'asmr-modal');
 infoEl.setAttribute('aria-hidden', 'true');
 const infoBox = el('div', 'box');
@@ -1799,7 +2137,6 @@ infoBox.append(infoHead, infoText);
 infoEl.appendChild(infoBox);
 let infoOpener = null;
 
-// В описаниях первая строка нередко просто повторяет заголовок окна («Размер шарика.» под «Размер шарика») — такую строку не показываем
 function infoBody(def) {
   const norm = (t) => t.toLowerCase().replace(/[^a-zа-яё0-9 ]/g, '').trim();
   const parts = (INFO[def.key] || '').split('\n');
@@ -1812,7 +2149,7 @@ function openInfo(def, opener) {
   infoText.textContent = infoBody(def);
   infoBox.scrollTop = 0;
   infoOpener = opener;
-  menu.inert = true;                                   // фон недоступен с клавиатуры, пока окно открыто
+  menu.inert = true;
   infoEl.setAttribute('aria-hidden', 'false');
   infoEl.classList.add('open');
   infoX.focus({ preventScroll: true });
@@ -1830,8 +2167,10 @@ infoEl.addEventListener('click', (e) => { if (e.target === infoEl) closeInfo(); 
 window.addEventListener('keydown', (e) => {
   if (!infoEl.classList.contains('open')) return;
   if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); closeInfo(); }
-  else if (e.key === 'Tab') { e.preventDefault(); infoX.focus({ preventScroll: true }); }   // фокус не уходит за окно
+  else if (e.key === 'Tab') { e.preventDefault(); infoX.focus({ preventScroll: true }); }
 }, true);
+
+const TOUCH_SEL = '.sl, .seg, input, .cswatch, .gbar, .gbtns button';
 
 function makeRow(def) {
   const row = el('div', 'row');
@@ -1839,20 +2178,17 @@ function makeRow(def) {
   const head = el('div', 'head');
   const label = el('label', '', { textContent: def.label });
   label.id = id + '-l';
-  if (def.hint) label.appendChild(el('small', '', { textContent: def.hint }));
   head.appendChild(label);
   row.appendChild(head);
 
-  let set;
+  let set, refresh;
   if (def.type === 'range') {
-    // Значение — это поле ввода: пальцем точно попасть в нужное число на коротком ползунке нельзя, а цифрами — можно.
-    // В фокусе в поле лежит «сырое» число (для процентных пунктов — в процентах), вне фокуса — красивая подпись.
     const val = el('input', 'val', { type: 'text', value: def.fmt(settings[def.key]) });
-    val.inputMode = def.min < 0 ? 'text' : 'decimal';          // на iPhone в «decimal» нет минуса, а баланс бывает отрицательным
+    val.inputMode = def.min < 0 ? 'text' : 'decimal';
     val.setAttribute('enterkeyhint', 'done');
     val.setAttribute('autocomplete', 'off');
     val.spellcheck = false;
-    val.setAttribute('aria-label', def.label + ' — ввести значение');
+    val.setAttribute('aria-label', def.label + ' — ввести число');
     const shown = (v) => String(parseFloat((def.pct ? v * 100 : v).toFixed(4)));
     let editCancelled = false;
     const sl = buildSlider(def, settings[def.key], label.id, (v) => {
@@ -1863,7 +2199,7 @@ function makeRow(def) {
     val.addEventListener('focus', () => {
       editCancelled = false;
       val.value = shown(settings[def.key]);
-      setTimeout(() => { try { val.select(); } catch (_) { /* не критично */ } }, 0);
+      setTimeout(() => { try { val.select(); } catch (_) {} }, 0);
     });
     val.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); val.blur(); }
@@ -1871,7 +2207,7 @@ function makeRow(def) {
     });
     val.addEventListener('blur', () => {
       const n = parseFloat(val.value.replace(',', '.').replace(/[^\d.\-]/g, ''));
-      if (!editCancelled && isFinite(n)) sl.apply(def.pct ? n / 100 : n);   // apply сам обрежет по краям и подгонит под шаг
+      if (!editCancelled && isFinite(n)) sl.apply(def.pct ? n / 100 : n);
       val.value = def.fmt(settings[def.key]);
     });
     set = (v) => { settings[def.key] = v; sl.set(v); if (document.activeElement !== val) val.value = def.fmt(v); };
@@ -1879,18 +2215,16 @@ function makeRow(def) {
     line.append(sl.node, val);
     row.appendChild(line);
   } else if (def.type === 'color') {
-    label.htmlFor = id;
-    const input = el('input', '', { id, type: 'color', value: settings[def.key] });
-    set = (v) => { settings[def.key] = v; input.value = v; };
-    input.addEventListener('input', () => { set(input.value); commit(def.key); });
-    head.appendChild(input);
+    const cb = makeColorButton(settings[def.key], (v) => { settings[def.key] = v; commit(def.key); }, def.label);
+    set = (v) => { settings[def.key] = v; cb.set(v); };
+    head.appendChild(cb.node);
   } else if (def.type === 'toggle') {
     label.htmlFor = id;
     const input = el('input', 'switch', { id, type: 'checkbox', checked: settings[def.key] });
     set = (v) => { settings[def.key] = v; input.checked = v; };
+    switchSyncs.push(() => { input.checked = !!settings[def.key]; });
     input.addEventListener('change', () => {
       set(input.checked);
-      // включили звук — клик это жест пользователя, звук разрешён; играем пробную ноту
       if (def.key === 'sound' && input.checked) {
         unlockAudio();
         setTimeout(() => playNote(7, 0.15, 0.6), 80);
@@ -1906,15 +2240,14 @@ function makeRow(def) {
     const glow = buildGlow(def);
     set = glow.set;
     row.appendChild(glow.node);
-  } else {                                                    // paint
+  } else {
     const paint = buildPaint(def);
     set = paint.set;
+    refresh = paint.refresh;
     row.appendChild(paint.node);
   }
-  controls[def.key] = { row, set };
+  controls[def.key] = { row, set, refresh };
 
-  // Кнопки строки. На самой карточке только две: «i» (описание) и «⋯». Под «⋯» открывается ряд действий с подписями словами:
-  // сбросить, случайное значение (у цветов ещё — случайный яркий оттенок). Раньше на каждой карточке было по 3–4 значка без подписей.
   const acts = el('div', 'acts');
   const tools = el('div', 'tools');
   const addAct = (parent, icon, title, fn, kind, text) => {
@@ -1923,23 +2256,23 @@ function makeRow(def) {
     b.setAttribute('aria-label', title);
     if (kind) b.dataset.a = kind;
     b.addEventListener('click', () => {
-      const ic = b.querySelector('svg');                 // значок коротко «играет» при нажатии
+      const ic = b.querySelector('svg');
       if (ic) { ic.classList.remove('go'); void ic.getBoundingClientRect(); ic.classList.add('go'); }
       fn();
     });
     parent.appendChild(b);
     return b;
   };
-  addAct(tools, ICONS.reset, 'Сбросить до значения при запуске', () => { set(initialValue(def)); commit(def.key); }, 'reset', 'Сбросить');
-  addAct(tools, ICONS.dice, 'Случайное значение', () => { set(randomValue(def, false)); commit(def.key); }, 'dice', 'Случайно');
+  addAct(tools, ICONS.reset, 'Вернуть исходное значение', () => { set(initialValue(def)); commit(def.key); }, 'reset', 'Сбросить');
+  addAct(tools, ICONS.dice, 'Случайное значение', () => { set(randomValue(def, false)); commit(def.key); }, 'dice', 'Случайное');
   if (def.type === 'color' || def.type === 'paint') {
-    addAct(tools, ICONS.hue, 'Случайный яркий цвет: любой оттенок при максимальной насыщенности', () => { set(randomValue(def, true)); commit(def.key); }, 'hue', 'Яркий оттенок');
+    addAct(tools, ICONS.hue, 'Случайный яркий цвет (максимальная насыщенность)', () => { set(randomValue(def, true)); commit(def.key); }, 'hue', 'Случайный яркий');
   }
   if (INFO[def.key]) {
-    const ib = addAct(acts, ICONS.info, 'Что это такое?', () => openInfo(def, ib), 'info');
+    const ib = addAct(acts, ICONS.info, 'Что это за настройка?', () => openInfo(def, ib), 'info');
     ib.classList.add('info-btn');
     ib.setAttribute('aria-haspopup', 'dialog');
-    ib.addEventListener('pointerdown', (e) => e.stopPropagation());   // нажатие на «i» не запускает превью карточки
+    ib.addEventListener('pointerdown', (e) => e.stopPropagation());
   }
   const moreBtn = addAct(acts, ICONS.more, 'Ещё: сбросить, случайное значение', () => {
     moreBtn.setAttribute('aria-expanded', String(row.classList.toggle('tools-open')));
@@ -1948,28 +2281,58 @@ function makeRow(def) {
   row.appendChild(tools);
   head.appendChild(acts);
 
-  row.addEventListener('pointerdown', () => activate(row, def.key, false));
-  row.addEventListener('focusin', (e) => {
-    if (e.target.closest && e.target.closest('.info-btn')) return;   // «i» только открывает описание, превью не нужно
-    activate(row, def.key, false);
+  row.addEventListener('pointerdown', (e) => {
+    if (e.target.closest && e.target.closest(TOUCH_SEL)) activate(row, def.key, false);
   });
   if (def.visible) visibles.push({ row, fn: def.visible });
   return row;
 }
 
-// Кнопки сверху
 const topBar = el('div', 'asmr-top');
-const randAllBtn = el('button', '', { type: 'button', textContent: 'Рандомизировать всё' });
+const randAllBtn = el('button', '', { type: 'button', textContent: 'Случайные настройки' });
 const resetAllBtn = el('button', '', { type: 'button', textContent: 'Сбросить всё' });
 topBar.append(randAllBtn, resetAllBtn);
 panel.appendChild(topBar);
 
-// Карточки при первом показе выезжают друг за другом (--i — порядковый номер для задержки)
+const colsEl = el('div', 'asmr-cols');
+panel.appendChild(colsEl);
+const cards = [];
+let colN = 0;
+
+function layoutCols(force) {
+  if (menu.style.display === 'none') return;
+  const w = colsEl.clientWidth;
+  if (!w) return;
+  const n = Math.max(1, Math.min(3, Math.floor((w + 12) / (340 + 12))));
+  if (!force && n === colN) return;
+  colN = n;
+  const cols = Array.from({ length: n }, () => el('div', 'asmr-col'));
+  colsEl.replaceChildren(...cols);
+  cards.forEach((c) => cols[0].appendChild(c));
+  if (n > 1) {
+    const hs = cards.map((c) => c.offsetHeight);
+    const acc = new Array(n).fill(0);
+    cards.forEach((c, i) => {
+      let k = 0;
+      for (let j = 1; j < n; j++) if (acc[j] < acc[k]) k = j;
+      cols[k].appendChild(c);
+      acc[k] += hs[i] + 12;
+    });
+  }
+}
+
 let introI = 0;
+let card = null;
 FIELDS.forEach((def) => {
-  const node = def.section ? el('div', 'sec', { textContent: def.section }) : makeRow(def);
-  node.style.setProperty('--i', Math.min(introI++, 16));
-  panel.appendChild(node);
+  if (def.section) {
+    card = el('div', 'card');
+    card.style.setProperty('--i', Math.min(introI++, 16));
+    card.appendChild(el('div', 'card-title', { textContent: def.section }));
+    cards.push(card);
+    colsEl.appendChild(card);
+    return;
+  }
+  card.appendChild(makeRow(def));
 });
 panel.classList.add('intro');
 setTimeout(() => panel.classList.remove('intro'), 1800);
@@ -1990,45 +2353,48 @@ resetAllBtn.addEventListener('click', () => {
   hidePreview(true);
 });
 
-const startBtn = el('button', 'asmr-start', { type: 'button', textContent: 'Начать рендеринг' });
+const startBtn = el('button', 'asmr-start', { type: 'button', textContent: 'Запустить' });
 panel.appendChild(startBtn);
 
-// Самая нижняя кнопка: скоростная запись в MP4 (логика — в блоке «Скоростная запись» ниже)
-const FAST_LABEL = 'Скоростная запись в MP4';
+const FAST_LABEL = 'Записать видео (MP4)';
 const fastBtn = el('button', 'asmr-fast', { type: 'button', textContent: FAST_LABEL });
 panel.append(fastBtn);
 
-const backBtn = el('button', 'asmr-back', { type: 'button', textContent: '← Назад' });
+const backBtn = el('button', 'asmr-back', { type: 'button', textContent: '← К настройкам' });
 
 document.body.append(menu, pvWrap, backBtn, infoEl);
+layoutCols(true);
 
-// Без этого на iOS не работает :active (подсветка нажатия) у кнопок
+window.addEventListener('pageshow', syncSwitches);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncSwitches(); });
+
 document.addEventListener('touchstart', () => {}, { passive: true });
 
-// Клик вне строк настроек снимает выделение карточки (превью возвращается к обычной сцене, но не исчезает)
 document.addEventListener('pointerdown', (e) => {
-  if (!e.target.closest('.row') && !e.target.closest('.asmr-pv')) hidePreview();
+  if (!e.target.closest('.row, .asmr-pv, .cpop, .asmr-modal')) hidePreview();
 });
-// Окно превью живёт, пока открыто меню: любое показ/скрытие меню (рендеринг, запись, возврат) автоматически скрывает/показывает его
 new MutationObserver(pvApplyRun).observe(menu, { attributes: true, attributeFilter: ['style'] });
 syncPreview(null);
 pvApplyRun();
-// На телефоне панель браузера сворачивается при прокрутке и шлёт resize — реагируем только на реальную смену ширины / высоты окна
 let lastW = window.innerWidth, lastH = window.innerHeight;
-window.addEventListener('resize', () => {
+const syncSizes = () => {
   const w = window.innerWidth, h = window.innerHeight;
-  if (w !== lastW || h !== lastH) { pvLayout(); pvQueueCanvasResize(); }   // окно превью всегда должно оставаться в пределах экрана
-  const bigH = Math.abs(h - lastH) > 120;                // скачок высоты поменьше — это панель Safari
-  if ((w !== lastW || bigH) && menu.style.display === 'none') mainSim.resize();
-  lastW = w; lastH = h;
-});
+  if (w !== lastW || h !== lastH) { pvLayout(); pvQueueCanvasResize(); lastW = w; lastH = h; }
+  if (menu.style.display === 'none') mainSim.resize();
+  layoutCols();
+};
+window.addEventListener('resize', syncSizes);
+window.addEventListener('orientationchange', () => { setTimeout(syncSizes, 120); setTimeout(syncSizes, 450); });
+if (window.ResizeObserver) {
+  new ResizeObserver(() => { if (menu.style.display === 'none') mainSim.resize(); }).observe(mainCanvas);
+  new ResizeObserver(() => layoutCols()).observe(colsEl);
+}
 
-// ── Приближение: колёсико мыши / щипок на тачскрине ──
 mainCanvas.addEventListener('wheel', (e) => {
   if (menu.style.display !== 'none') return;
   e.preventDefault();
-  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;     // строки / страницы → пиксели
-  const k = e.ctrlKey ? 0.01 : 0.0015;                                    // ctrl+колёсико = щипок на тачпаде
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+  const k = e.ctrlKey ? 0.01 : 0.0015;
   mainSim.zoomBy(Math.exp(-e.deltaY * unit * k));
   noteZoom();
 }, { passive: false });
@@ -2041,7 +2407,7 @@ const touchDist = () => {
 };
 mainCanvas.addEventListener('pointerdown', (e) => {
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  try { mainCanvas.setPointerCapture(e.pointerId); } catch (_) { /* не критично */ }
+  try { mainCanvas.setPointerCapture(e.pointerId); } catch (_) {}
   if (touches.size === 2) pinchDist = touchDist();
 });
 mainCanvas.addEventListener('pointermove', (e) => {
@@ -2060,8 +2426,7 @@ const endTouch = (e) => {
 mainCanvas.addEventListener('pointerup', endTouch);
 mainCanvas.addEventListener('pointercancel', endTouch);
 
-// Подсказка про приближение: показывается при запуске рендеринга и сама гаснет; после первого приближения больше не появляется
-const zoomHint = el('div', 'asmr-hint', { textContent: COARSE ? 'Приблизить — щипок двумя пальцами' : 'Приблизить — колёсико мыши или щипок на тачпаде' });
+const zoomHint = el('div', 'asmr-hint', { textContent: COARSE ? 'Приблизить: сведите или разведите два пальца' : 'Приблизить: колёсико мыши или щипок на тачпаде' });
 zoomHint.setAttribute('role', 'status');
 document.body.appendChild(zoomHint);
 let zoomHintTimer = 0, zoomUsed = false;
@@ -2075,7 +2440,7 @@ function showZoomHint() {
 function noteZoom() { zoomUsed = true; hideZoomHint(); }
 
 function startRender() {
-  unlockAudio();                 // клик по кнопке — жест пользователя, звук разрешён
+  unlockAudio();
   hidePreview();
   menu.style.display = 'none';
   backBtn.style.display = 'block';
@@ -2086,13 +2451,12 @@ function startRender() {
   showZoomHint();
 }
 
-// Настройки живут в объекте settings и в самих полях меню — при возврате ничего не сбрасывается
 function backToMenu() {
   hideZoomHint();
   mainSim.stop();
   backBtn.style.display = 'none';
   menu.style.display = 'flex';
-  menu.classList.remove('fade');                // мягкое появление меню после рендеринга
+  menu.classList.remove('fade');
   void menu.offsetWidth;
   menu.classList.add('fade');
 }
@@ -2103,22 +2467,14 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && menu.style.display === 'none' && recScreen.style.display === 'none') backToMenu();
 });
 
-// ───────────────────────────── Скоростная запись в MP4 ─────────────────────────────
-// Сцена считается и рисуется БЕЗ привязки к реальным часам — кадр за кадром с фиксированным шагом 1/60 с — настолько быстро,
-// насколько позволяет железо. Каждый кадр сразу уходит в видеокодировщик браузера (WebCodecs, H.264 или VP9), а метки времени
-// проставляются по номеру кадра (i / 60 с) — поэтому в готовом файле всё идёт в обычной скорости, а не ускоренно.
-// Звук собирается отдельно: все столкновения запоминаются с временем симуляции и синтезируются в OfflineAudioContext (AAC или Opus). Упаковка в MP4 — встроенная (Mp4Writer), без внешних библиотек и интернета.
-// «Чтобы железо не сошло с ума»: очередь кодировщика ограничена (если он не успевает — рендер ждёт), работа идёт короткими
-// слайсами по ~12 мс с отдачей управления браузеру, видео квадратное 1:1 (сцена вписана в кадр без чёрных полей), длина — не больше REC_MAX_SECONDS.
 const REC_FPS = 60;
-const REC_SIDES = COARSE ? [720, 480] : [1080, 720, 480];   // сторона квадратного кадра: пробуем по порядку, пока кодировщик не согласится
-const REC_MAX_SECONDS = 120;          // предохранитель: если шарик так и не выбрался, запись остановится сама
-const REC_MAX_INFLIGHT = 6;           // сколько кадров максимум может быть «в полёте» (отправлено в кодировщик, но ещё не вышло из него)
+const REC_SIDES = COARSE ? [720, 480] : [1080, 720, 480];
+const REC_MAX_SECONDS = 120;
+const REC_MAX_INFLIGHT = 6;
 const REC_AUDIO_RATE = 48000;
 class RecCancelled extends Error {}
 let recJob = null;
 
-// ── Экран записи ──
 document.head.appendChild(Object.assign(document.createElement('style'), { textContent: `
 .asmr-rec{position:fixed;inset:0;z-index:30;display:none;overflow-y:auto;justify-content:center;align-items:flex-start;overscroll-behavior:contain;
   padding:max(20px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) 0 max(12px,env(safe-area-inset-left));box-sizing:border-box;
@@ -2154,8 +2510,8 @@ const recFill = el('div', 'rec-fill');
 const recPhase = el('div', 'rec-phase');
 const recCells = {};
 const recInfo = el('div', 'rec-info');
-[['codec', 'Кодировщик'], ['res', 'Разрешение'], ['size', 'Размер записи'], ['video', 'Длина видео'],
-  ['speed', 'Скорость'], ['eta', 'Осталось']].forEach(([key, label]) => {
+[['codec', 'Кодек'], ['res', 'Разрешение'], ['size', 'Размер файла'], ['video', 'Длительность'],
+  ['speed', 'Скорость записи'], ['eta', 'Осталось']].forEach(([key, label]) => {
   const cell = el('div', 'rec-cell');
   const small = el('small', '', { textContent: label });
   recCells[key] = el('b', '', { textContent: '—' });
@@ -2166,23 +2522,23 @@ const recTech = el('div', 'rec-tech');
 const recMore = el('details', 'rec-more');
 recMore.append(el('summary', '', { textContent: 'Подробности' }), recInfo, recTech);
 const recWarn = el('div', 'rec-warn', {
-  textContent: 'Съёмка может занять до 2 минут. Не закрывайте и не обновляйте сайт, не сворачивайте браузер и не блокируйте экран, пока идёт запись — иначе она прервётся.',
+  textContent: 'Запись может занять до 2 минут. Пока она идёт, не закрывайте и не обновляйте страницу, не сворачивайте браузер и не выключайте экран — иначе запись прервётся.',
 });
 const recStop = el('button', 'asmr-fast busy', { type: 'button', textContent: '■ Остановить запись' });
 const recAgain = el('button', 'asmr-fast', { type: 'button', textContent: '⬇ Скачать ещё раз' });
-const recBack = el('button', 'asmr-fast', { type: 'button', textContent: '← Назад в меню' });
+const recBack = el('button', 'asmr-fast', { type: 'button', textContent: '← К настройкам' });
 const recProg = el('div', 'rec-prog');
 recProg.append(recRings, recPct);
 const recBar = el('div', 'rec-bar');
 recBar.appendChild(recFill);
 const recBox = el('div', 'rec-box');
 const recActions = el('div', 'rec-actions');
-recActions.append(recStop, recAgain, recBack);      // закреплены внизу экрана: кнопка «Остановить» всегда под пальцем, без прокрутки
-recBox.append(el('h2', '', { textContent: 'Скоростная запись' }), recView, recProg, recBar, recPhase, recMore, recWarn, recActions);
+recActions.append(recStop, recAgain, recBack);
+recBox.append(el('h2', '', { textContent: 'Запись видео' }), recView, recProg, recBar, recPhase, recMore, recWarn, recActions);
 recScreen.appendChild(recBox);
 document.body.appendChild(recScreen);
 
-const recLast = { url: null, blob: null, name: '' };   // готовый файл — для кнопки «Скачать ещё раз»
+const recLast = { url: null, blob: null, name: '' };
 
 function downloadUrl(url, name) {
   const a = el('a', '', { href: url, download: name });
@@ -2212,7 +2568,7 @@ function recOpen() {
   Object.values(recCells).forEach((c) => { c.textContent = '—'; });
   recMore.open = false;
   recTech.textContent = '';
-  setProgress(0, 'Колец осталось: —');
+  setProgress(0, 'Осталось колец: —');
   recViewCtx.fillStyle = '#000';
   recViewCtx.fillRect(0, 0, recView.width, recView.height);
   recStop.style.display = 'block';
@@ -2231,26 +2587,21 @@ function recFinish() {
   recAgain.style.display = recLast.url ? 'block' : 'none';
 }
 
-// Остановка. Вызывается безопасно сколько угодно раз.
 function requestStop() {
   if (!recJob || recJob.cancel) return;
   recJob.cancel = true;
-  recJob.abort();                                          // прерывает и долгие ожидания (кодировщик, синтез звука), а не только цикл кадров
+  recJob.abort();
   recStop.disabled = true;
   recStop.textContent = 'Останавливаю…';
 }
-// Основной путь — pointerup: на iPhone «click» после касания синтезируется с задержкой и пропадает, если страница в этот
-// момент занята или если кнопка хоть чуть сдвинулась. pointerup у касания всегда приходит на ту кнопку, на которой палец
-// был прижат. Проверяем, что палец отпущен над кнопкой (иначе человек передумал). «click» оставлен для клавиатуры и мыши.
 recStop.addEventListener('pointerup', (e) => {
   const r = recStop.getBoundingClientRect(), m = 12;
   if (e.clientX >= r.left - m && e.clientX <= r.right + m && e.clientY >= r.top - m && e.clientY <= r.bottom + m) requestStop();
 });
 recStop.addEventListener('click', requestStop);
-// Кнопка скачивает файл напрямую. На телефоне автоскачивание после записи браузеры часто блокируют — там качаем по нажатию кнопки
 function saveLast() {
   if (!recLast.url) return;
-  downloadUrl(recLast.url, recLast.name);                // обычная загрузка файла — без системного меню «Поделиться»
+  downloadUrl(recLast.url, recLast.name);
 }
 recAgain.addEventListener('click', saveLast);
 recBack.addEventListener('click', () => {
@@ -2262,7 +2613,6 @@ recBack.addEventListener('click', () => {
 
 const onUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
 
-// Экран не должен гаснуть во время записи (иначе телефон усыпляет вкладку и запись срывается)
 let wakeLock = null;
 let recWasHidden = false, recResumedAt = 0;
 async function acquireWake() {
@@ -2271,24 +2621,22 @@ async function acquireWake() {
       wakeLock = await navigator.wakeLock.request('screen');
       wakeLock.addEventListener('release', () => { wakeLock = null; });
     }
-  } catch (_) { /* не поддерживается или отказано — не критично */ }
+  } catch (_) {}
 }
 function releaseWake() {
-  try { if (wakeLock) wakeLock.release(); } catch (_) { /* уже снят */ }
+  try { if (wakeLock) wakeLock.release(); } catch (_) {}
   wakeLock = null;
 }
 const onRecVisibility = () => {
   if (!recJob) return;
   if (document.hidden) recWasHidden = true;
-  else { recResumedAt = performance.now(); acquireWake(); }   // система снимает блокировку при сворачивании — берём заново
+  else { recResumedAt = performance.now(); acquireWake(); }
 };
 
-// Сырой текст исключения («Error: …», «NotSupportedError: …») обычному человеку ничего не говорит — переводим в понятную фразу.
-// Точная техническая причина остаётся в консоли и в «Подробностях» на экране записи.
 function explainRecError(err) {
   const name = (err && err.name) || '';
   const msg = String((err && err.message) || err || '');
-  if (/[а-яё]/i.test(msg)) return msg;                       // наши собственные сообщения уже написаны по-русски
+  if (/[а-яё]/i.test(msg)) return msg;
   const low = (name + ' ' + msg).toLowerCase();
   if (name === 'NotSupportedError' || /not supported|unsupported|codec/.test(low)) {
     return 'Браузер не смог закодировать видео в этом формате. Попробуйте Chrome или Edge.';
@@ -2297,7 +2645,7 @@ function explainRecError(err) {
     return 'Не хватило памяти для записи. Закройте другие вкладки и попробуйте ещё раз.';
   }
   if (name === 'EncodingError' || /encod/.test(low)) {
-    return 'Кодировщик видео сообщил об ошибке. Попробуйте ещё раз или откройте сайт в Chrome или Edge.';
+    return 'При обработке видео произошла ошибка. Попробуйте ещё раз или откройте сайт в Chrome или Edge.';
   }
   return 'Не удалось записать видео. Попробуйте ещё раз.';
 }
@@ -2307,11 +2655,6 @@ const setStatus = (text, isErr) => {
   recPhase.classList.toggle('err', !!isErr);
 };
 
-// ───────────────────────────── Встроенный MP4-мультиплексор ─────────────────────────────
-// Раньше упаковку делала библиотека mp4-muxer, которую страница докачивала с CDN, — без интернета запись не работала.
-// Теперь всё нужное лежит здесь: закодированные кадры и звук складываются в обычный MP4 (блок moov стоит перед mdat,
-// поэтому файл открывается и перематывается сразу). Видео — H.264 или VP9, звук — AAC или Opus. Кадры идут в порядке показа
-// (кодировщик запущен в режиме realtime, B-кадров нет), поэтому таблица задержек ctts не нужна.
 const Mp4Writer = (() => {
   const be = (n, len) => { const a = new Uint8Array(len); for (let i = len - 1; i >= 0; i--) { a[i] = n & 255; n = Math.floor(n / 256); } return a; };
   const ascii = (s) => Uint8Array.from(s, (c) => c.charCodeAt(0));
@@ -2327,7 +2670,7 @@ const Mp4Writer = (() => {
   };
   const box = (type, ...parts) => { const body = cat(...parts); return cat(be(body.length + 8, 4), ascii(type), body); };
   const full = (type, version, flags, ...parts) => box(type, be(version * 16777216 + flags, 4), ...parts);
-  const u32s = (arr) => {                                   // массив чисел → подряд идущие 32-битные big-endian
+  const u32s = (arr) => {
     const out = new Uint8Array(arr.length * 4);
     const dv = new DataView(out.buffer);
     for (let i = 0; i < arr.length; i++) dv.setUint32(i * 4, arr[i]);
@@ -2339,10 +2682,10 @@ const Mp4Writer = (() => {
 
   function configBox(t) {
     if (t.codec === 'avc') {
-      if (!t.description) throw new Error('Кодировщик не вернул параметры H.264 (avcC).');
+      if (!t.description) throw new Error('Браузер не передал параметры H.264, нужные для сборки файла.');
       return box('avcC', t.description);
     }
-    if (t.codec === 'vp9') {                                // 'vp09.PP.LL.BD[.CC.cp.tc.mc.FF]'
+    if (t.codec === 'vp9') {
       const p = (t.string || 'vp09.00.41.08').split('.');
       const n = (i, d) => (p[i] !== undefined && p[i] !== '' ? parseInt(p[i], 10) : d);
       const bitDepth = n(3, 8), chroma = n(4, 1), range = n(8, 0);
@@ -2350,7 +2693,7 @@ const Mp4Writer = (() => {
     }
     if (t.codec === 'aac') {
       let asc = t.description;
-      if (!asc) {                                           // запасной вариант: AAC-LC, параметры из настроек
+      if (!asc) {
         const fi = Math.max(0, AAC_RATES.indexOf(t.sampleRate));
         asc = Uint8Array.of((2 << 3) | (fi >> 1), ((fi & 1) << 7) | (t.channels << 3));
       }
@@ -2360,7 +2703,6 @@ const Mp4Writer = (() => {
       const body = cat(Uint8Array.of(0, 0, 0), dcdFull, Uint8Array.of(0x06, 0x01, 0x02));
       return full('esds', 0, 0, Uint8Array.of(0x03, body.length), body);
     }
-    // Opus: из OpusHead (little-endian) делаем dOps (big-endian); если описания нет — типичные значения libopus
     let pre = 312, rate = t.sampleRate, gain = 0, family = 0, ch = t.channels;
     const d = t.description;
     if (d && d.length >= 19 && d[0] === 0x4f) {
@@ -2388,7 +2730,7 @@ const Mp4Writer = (() => {
     const mdhd = full('mdhd', 0, 0, be(0, 4), be(0, 4), be(t.timescale, 4), be(t.duration, 4), be(0x55c4, 2), be(0, 2));
     const hdlr = full('hdlr', 0, 0, be(0, 4), ascii(isV ? 'vide' : 'soun'), zeros(12), ascii(isV ? 'VideoHandler' : 'SoundHandler'), zeros(1));
 
-    const runs = [];                                        // stts: подряд идущие одинаковые длительности — одной записью
+    const runs = [];
     for (const s of t.samples) {
       const last = runs[runs.length - 1];
       if (last && last[1] === s.dur) last[0]++; else runs.push([1, s.dur]);
@@ -2397,7 +2739,7 @@ const Mp4Writer = (() => {
     const keys = [];
     t.samples.forEach((s, i) => { if (s.key) keys.push(i + 1); });
     const stss = isV ? full('stss', 0, 0, be(keys.length, 4), u32s(keys)) : new Uint8Array(0);
-    const stsc = full('stsc', 0, 0, be(1, 4), be(1, 4), be(1, 4), be(1, 4));          // каждый «чанк» — ровно один семпл
+    const stsc = full('stsc', 0, 0, be(1, 4), be(1, 4), be(1, 4), be(1, 4));
     const stsz = full('stsz', 0, 0, be(0, 4), be(t.samples.length, 4), u32s(t.samples.map((s) => s.data.length)));
     const stco = full('stco', 0, 0, be(t.samples.length, 4), u32s(offsets));
     const stsd = full('stsd', 0, 0, be(1, 4), sampleEntry(t));
@@ -2408,7 +2750,6 @@ const Mp4Writer = (() => {
   }
 
   class Mp4Writer {
-    // opts: { video: { codec: 'avc'|'vp9', string, width, height }, audio?: { codec: 'aac'|'opus', channels, sampleRate } }
     constructor(opts) {
       this.v = { kind: 'video', ...opts.video, timescale: 90000, samples: [], description: null };
       this.a = opts.audio ? { kind: 'audio', ...opts.audio, timescale: opts.audio.sampleRate, samples: [], description: null } : null;
@@ -2416,7 +2757,7 @@ const Mp4Writer = (() => {
     _add(t, chunk, meta) {
       if (meta && meta.decoderConfig && meta.decoderConfig.description && !t.description) t.description = toU8(meta.decoderConfig.description).slice();
       const last = t.samples[t.samples.length - 1];
-      if (last && chunk.timestamp < last.ts) throw new Error('Кодировщик выдал кадры не по порядку.');
+      if (last && chunk.timestamp < last.ts) throw new Error('Кадры видео пришли не по порядку, файл собрать не получилось.');
       const data = new Uint8Array(chunk.byteLength);
       chunk.copyTo(data);
       t.samples.push({ data, ts: chunk.timestamp, durUs: chunk.duration || 0, key: chunk.type !== 'delta' });
@@ -2424,10 +2765,9 @@ const Mp4Writer = (() => {
     addVideoChunk(chunk, meta) { this._add(this.v, chunk, meta); }
     addAudioChunk(chunk, meta) { if (this.a) this._add(this.a, chunk, meta); }
 
-    // Возвращает Blob с готовым MP4
     finalize() {
       const tracks = [this.v, this.a].filter((t) => t && t.samples.length);
-      if (!this.v.samples.length) throw new Error('В видео не оказалось ни одного кадра.');
+      if (!this.v.samples.length) throw new Error('В видео нет ни одного кадра.');
       for (const t of tracks) {
         const k = t.timescale / 1e6, s = t.samples;
         s.forEach((x) => { x.tick = Math.round(x.ts * k); });
@@ -2437,7 +2777,6 @@ const Mp4Writer = (() => {
         });
         t.duration = s.reduce((sum, x) => sum + x.dur, 0);
       }
-      // Кадры и звук идут вперемешку по времени — так файл удобно проигрывать и перематывать
       const order = [];
       tracks.forEach((t, ti) => t.samples.forEach((s, si) => order.push({ ti, si, s, time: s.tick / t.timescale })));
       order.sort((x, y) => x.time - y.time || x.ti - y.ti);
@@ -2449,10 +2788,10 @@ const Mp4Writer = (() => {
         return box('moov', mvhd, tracks.map((t, i) => buildTrak(t, i + 1, offs[i])));
       };
       const offs = tracks.map((t) => new Array(t.samples.length).fill(0));
-      const base = ftyp.length + buildMoov(offs).length + 8;      // размер moov от смещений не зависит
+      const base = ftyp.length + buildMoov(offs).length + 8;
       let pos = base;
       for (const o of order) { offs[o.ti][o.si] = pos; pos += o.s.data.length; }
-      if (pos >= 4294967295) throw new Error('Видео получилось больше 4 ГБ — такой MP4 не собрать.');
+      if (pos >= 4294967295) throw new Error('Видео вышло больше 4 ГБ — файл MP4 такого размера собрать нельзя. Сделайте сцену короче.');
       const moov = buildMoov(offs);
       return new Blob([ftyp, moov, cat(be(pos - base + 8, 4), ascii('mdat')), ...order.map((o) => o.s.data)], { type: 'video/mp4' });
     }
@@ -2460,17 +2799,13 @@ const Mp4Writer = (() => {
   return Mp4Writer;
 })();
 
-// Отдача управления без задержки таймеров (MessageChannel не душится в фоновой вкладке так, как setTimeout)
 const yieldChannel = new MessageChannel();
 let yieldResolve = null;
 yieldChannel.port1.onmessage = () => { const r = yieldResolve; yieldResolve = null; if (r) r(); };
 const yieldNow = () => new Promise((r) => { yieldResolve = r; yieldChannel.port2.postMessage(0); });
-const yieldPaint = () => new Promise((r) => setTimeout(r, 0));   // даём браузеру успеть отрисовать статус
-// Цепочка MessageChannel-пауз ни разу не оставляет браузеру свободной секунды: касания (в первую очередь на iOS) стоят
-// в очереди, и кнопка «Остановить» срабатывает с большой задержкой или теряется. Раз в ~50 мс делаем настоящую паузу по таймеру.
+const yieldPaint = () => new Promise((r) => setTimeout(r, 0));
 const yieldInput = () => new Promise((r) => setTimeout(r, 0));
 
-// Ждём, пока кодировщик разгребёт очередь (с таймаутом на случай, если событие dequeue не поддерживается)
 const waitDequeue = (enc) => new Promise((resolve) => {
   let done = false;
   const fin = () => { if (done) return; done = true; enc.removeEventListener('dequeue', fin); resolve(); };
@@ -2478,8 +2813,6 @@ const waitDequeue = (enc) => new Promise((resolve) => {
   setTimeout(fin, 50);
 });
 
-// Кодеки по порядку предпочтения: H.264 (работает почти везде), запасной — VP9 (в Firefox на Linux H.264 обычно нет).
-// mux — имя кодека для встроенного мультиплексора (Mp4Writer).
 const VIDEO_CODECS = [
   { codec: 'avc1.640033', mux: 'avc' },
   { codec: 'avc1.64002A', mux: 'avc' },
@@ -2493,7 +2826,6 @@ const AUDIO_CODECS = [
   { codec: 'opus', mux: 'opus' },
 ];
 
-// isConfigSupported иногда обещает больше, чем браузер умеет, поэтому проверяем по-настоящему: кодируем один пробный кадр
 async function probeVideo(cfg) {
   let err = null;
   let enc = null;
@@ -2512,15 +2844,14 @@ async function probeVideo(cfg) {
   } catch (_) {
     return false;
   } finally {
-    try { if (enc && enc.state !== 'closed') enc.close(); } catch (_) { /* уже закрыт */ }
+    try { if (enc && enc.state !== 'closed') enc.close(); } catch (_) {}
   }
 }
 
-// Ищем рабочее сочетание кодек + разрешение. Кадр квадратный: сцена круглая, и так в видео нет лишних чёрных полей по бокам
 async function pickVideo(job) {
   for (const side of REC_SIDES) {
     const W = side, H = side;
-    const bitrate = Math.round(W * H * 4);                      // ≈ 4.7 Мбит/с для 1080×1080
+    const bitrate = Math.round(W * H * 4);
     for (const c of VIDEO_CODECS) {
       if (job && job.cancel) throw new RecCancelled();
       const cfg = { codec: c.codec, width: W, height: H, bitrate, framerate: REC_FPS, latencyMode: 'realtime' };
@@ -2530,7 +2861,6 @@ async function pickVideo(job) {
   return null;
 }
 
-// Синтез звука столкновений офлайн: быстрее реального времени, длина ровно по видео
 async function renderAudioOffline(events, seconds) {
   const length = Math.max(1, Math.ceil(seconds * REC_AUDIO_RATE));
   const oc = new OfflineAudioContext(2, length, REC_AUDIO_RATE);
@@ -2541,13 +2871,13 @@ async function renderAudioOffline(events, seconds) {
 async function recordFast() {
   const job = { cancel: false, abort: null };
   job.aborted = new Promise((_, reject) => { job.abort = () => reject(new RecCancelled()); });
-  job.aborted.catch(() => {});                              // чтобы браузер не ругался на «необработанное» отклонение
+  job.aborted.catch(() => {});
   recJob = job;
   recOpen();
   hidePreview();
 
   if (!('VideoEncoder' in window) || !('VideoFrame' in window)) {
-    setStatus('Этот браузер не поддерживает WebCodecs. Откройте сайт в Chrome, Edge или свежем Firefox.', true);
+    setStatus('Этот браузер не умеет записывать видео. Откройте сайт в Chrome, Edge или в последней версии Firefox.', true);
     recJob = null;
     recFinish();
     return;
@@ -2559,7 +2889,6 @@ async function recordFast() {
 
   let venc = null, aenc = null, recSim = null;
   const checkAbort = () => { if (job.cancel) throw new RecCancelled(); };
-  // Долгие ожидания (подбор кодека, досчёт кодировщика, синтез звука) гонятся с отменой — кнопка «Остановить» срабатывает сразу
   const guard = (promise) => Promise.race([promise, job.aborted]);
 
   try {
@@ -2567,15 +2896,15 @@ async function recordFast() {
     await yieldPaint();
     checkAbort();
 
-    const snap = JSON.parse(JSON.stringify(settings));      // снимок настроек: правки меню во время записи не влияют
+    const snap = JSON.parse(JSON.stringify(settings));
 
-    setStatus('Подбираю кодек…');
+    setStatus('Выбираю формат видео…');
     await yieldPaint();
     const vsel = await guard(pickVideo(job));
-    if (!vsel) throw new Error('Браузер не смог запустить ни один видеокодек (пробовал H.264 и VP9).');
+    if (!vsel) throw new Error('Браузер не смог записать видео ни в одном из форматов (H.264, VP9).');
     const vcfg = vsel.cfg, W = vsel.W, H = vsel.H;
     recCells.codec.textContent = `${vsel.mux.toUpperCase()} (${vcfg.codec})`;
-    recCells.res.textContent = `${W}×${H} · ${REC_FPS} кадр/с`;
+    recCells.res.textContent = `${W}×${H} · ${REC_FPS} кадров/с`;
     checkAbort();
 
     let acfg = null, audioMux = null;
@@ -2584,7 +2913,7 @@ async function recordFast() {
         const cfg = { codec: c.codec, sampleRate: REC_AUDIO_RATE, numberOfChannels: 2, bitrate: 128000 };
         try {
           if ((await AudioEncoder.isConfigSupported(cfg)).supported) { acfg = cfg; audioMux = c.mux; break; }
-        } catch (_) { /* следующий кодек */ }
+        } catch (_) {}
       }
     }
     const wantAudio = !!acfg;
@@ -2596,8 +2925,8 @@ async function recordFast() {
     });
 
     let encError = null;
-    let inflight = 0;                                       // свой счётчик кадров в кодировщике (encodeQueueSize в Firefox ненадёжен)
-    let bytes = 0;                                          // сколько уже весит запись
+    let inflight = 0;
+    let bytes = 0;
     venc = new VideoEncoder({
       output: (chunk, meta) => {
         inflight--;
@@ -2608,7 +2937,6 @@ async function recordFast() {
     });
     venc.configure(vcfg);
 
-    // Отдельная невидимая сцена: то, что на экране, не трогаем. Кадр квадратный — сцена вписана без чёрных полей
     const recCanvas = document.createElement('canvas');
     recSim = createSim(recCanvas, { getSize: () => [W, H], dpr: 1, particles: 1200, burst: 70, audio: true });
     recSim.configure(snap, { mode: 'full' });
@@ -2616,7 +2944,6 @@ async function recordFast() {
     const events = [];
     recSim.beginCapture(events);
 
-    // ── Видео: кадры считаются на максимальной скорости ──
     const dt = 1 / REC_FPS;
     const frameDur = Math.round(1e6 / REC_FPS);
     const wallStart = performance.now();
@@ -2628,25 +2955,25 @@ async function recordFast() {
       const vSec = frame / REC_FPS, wSec = Math.max(0.001, (now - wallStart) / 1000);
       let eta = 'считаю…';
       if (p > 0.03 && wSec > 3) {
-        const raw = (wSec * (1 - p)) / p;                   // грубая оценка: по доле разрушенных колец
+        const raw = (wSec * (1 - p)) / p;
         etaSmooth = etaSmooth == null ? raw : etaSmooth * 0.85 + raw * 0.15;
         eta = '≈ ' + fmtDuration(etaSmooth);
       }
-      setProgress(p, `Колец осталось: ${total - done} из ${total}`);
+      setProgress(p, `Осталось колец: ${total - done} из ${total}`);
       recCells.size.textContent = (bytes / 1048576).toFixed(1) + ' МБ';
       recCells.video.textContent = vSec.toFixed(1) + ' с';
       recCells.speed.textContent = '×' + (vSec / wSec).toFixed(1);
       recCells.eta.textContent = eta;
-      recViewCtx.drawImage(recCanvas, 0, 0, recView.width, recView.height);   // «окошко» в то, что сейчас считается
+      recViewCtx.drawImage(recCanvas, 0, 0, recView.width, recView.height);
     };
 
-    setStatus('Идёт запись: кадры считаются быстрее реального времени.');
+    setStatus('Идёт запись: видео считается быстрее, чем длится сцена.');
 
     for (;;) {
       checkAbort();
       if (encError) throw encError;
 
-      if (!recSim.advance(dt)) break;                       // полный цикл сцены записан
+      if (!recSim.advance(dt)) break;
 
       const vf = new VideoFrame(recCanvas, { timestamp: Math.round((frame * 1e6) / REC_FPS), duration: frameDur });
       venc.encode(vf, { keyFrame: frame % (REC_FPS * 2) === 0 });
@@ -2655,15 +2982,13 @@ async function recordFast() {
 
       if (frame / REC_FPS >= REC_MAX_SECONDS) { capped = true; break; }
 
-      // кодировщик не успевает — ждём, пока он разгребёт очередь (иначе кадры копятся в памяти и система зависает)
       inflight++;
       let stallStart = performance.now();
       while (inflight >= REC_MAX_INFLIGHT) {
         checkAbort();
         if (encError) throw encError;
-        // пока вкладка была в фоне (или только что вернулась) — таймер зависания не считаем
         if (document.hidden || recResumedAt > stallStart) stallStart = performance.now();
-        if (performance.now() - stallStart > 15000) throw new Error('Кодировщик перестал отвечать (15 секунд без результата). Закройте другие вкладки и попробуйте ещё раз.');
+        if (performance.now() - stallStart > 15000) throw new Error('Запись зависла: 15 секунд нет результата. Закройте другие вкладки и попробуйте ещё раз.');
         await new Promise((r) => setTimeout(r, 4));
       }
 
@@ -2684,11 +3009,11 @@ async function recordFast() {
       }
     }
     recSim.endCapture();
-    setProgress(1, 'Колец осталось: 0');
+    setProgress(1, 'Осталось колец: 0');
     recCells.eta.textContent = '—';
 
     checkAbort();
-    setStatus('Досчитываю видео…');
+    setStatus('Завершаю обработку видео…');
     await guard(venc.flush());
     if (encError) throw encError;
     venc.close();
@@ -2698,9 +3023,8 @@ async function recordFast() {
 
     const seconds = frame / REC_FPS;
 
-    // ── Звук ──
     if (wantAudio) {
-      setStatus('Синтезирую звук…');
+      setStatus('Записываю звук…');
       await yieldPaint();
       const buf = await guard(renderAudioOffline(events, seconds));
       checkAbort();
@@ -2715,12 +3039,15 @@ async function recordFast() {
       const c0 = buf.getChannelData(0);
       const c1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : c0;
       const clamp = (v) => (v > 1 ? 1 : v < -1 ? -1 : v);
+      let peak = 0;
+      for (let i = 0; i < buf.length; i++) { const a = Math.abs(c0[i]), b = Math.abs(c1[i]); if (a > peak) peak = a; if (b > peak) peak = b; }
+      const norm = peak > 0.98 ? 0.98 / peak : 1;
       for (let off = 0; off < buf.length; off += CHUNK) {
         checkAbort();
         if (encError) throw encError;
         const n = Math.min(CHUNK, buf.length - off);
-        const data = new Float32Array(n * 2);                // planar: сначала левый канал, потом правый
-        for (let i = 0; i < n; i++) { data[i] = clamp(c0[off + i]); data[n + i] = clamp(c1[off + i]); }
+        const data = new Float32Array(n * 2);
+        for (let i = 0; i < n; i++) { data[i] = clamp(c0[off + i] * norm); data[n + i] = clamp(c1[off + i] * norm); }
         const ad = new AudioData({
           format: 'f32-planar', sampleRate: REC_AUDIO_RATE, numberOfFrames: n, numberOfChannels: 2,
           timestamp: Math.round((off / REC_AUDIO_RATE) * 1e6), data,
@@ -2735,35 +3062,33 @@ async function recordFast() {
       aenc = null;
     }
 
-    // ── Готовый файл → загрузка в браузере ──
-    setStatus('Собираю MP4…');
+    setStatus('Собираю файл MP4…');
     await yieldPaint();
     const blob = muxer.finalize();
     const url = URL.createObjectURL(blob);
     recLast.url = url;
     recLast.blob = blob;
     recLast.name = `asmr-physics-${W}x${H}.mp4`;
-    if (!COARSE) downloadUrl(url, recLast.name);          // на телефоне — по кнопке (нужен жест пользователя)
+    if (!COARSE) downloadUrl(url, recLast.name);
     recCells.size.textContent = (blob.size / 1048576).toFixed(1) + ' МБ';
 
     const wall = (performance.now() - wallStart) / 1000;
     setStatus(
-      `Готово: ${seconds.toFixed(1)} с видео за ${wall.toFixed(1)} с (×${(seconds / wall).toFixed(1)}), ${(blob.size / 1048576).toFixed(1)} МБ. ` + (COARSE ? 'Нажмите «Скачать видео».' : 'Файл скачан.') +
-      (capped ? `\nДостигнут лимит ${REC_MAX_SECONDS} с — запись остановлена.` : '') +
-      (audioSkipped ? '\nЗвук не записан: браузер не умеет кодировать AAC/Opus.' : ''),
+      `Готово: видео на ${seconds.toFixed(1)} с записано за ${wall.toFixed(1)} с (×${(seconds / wall).toFixed(1)}), ${(blob.size / 1048576).toFixed(1)} МБ. ` + (COARSE ? 'Нажмите «Скачать видео».' : 'Файл уже скачан.') +
+      (capped ? `\nВидео обрезано: достигнут лимит ${REC_MAX_SECONDS} с.` : '') +
+      (audioSkipped ? '\nВидео без звука: этот браузер не умеет записывать звук.' : ''),
     );
   } catch (err) {
     if (err instanceof RecCancelled) setStatus('Запись остановлена.');
     else {
-      console.error(err);
       recTech.textContent = ((err && err.name) ? err.name + ': ' : '') + String((err && err.message) || err);
       setStatus(explainRecError(err) +
         (recWasHidden ? '\nВо время записи экран гас или браузер сворачивался — оставьте вкладку открытой и не блокируйте телефон.' : ''), true);
     }
   } finally {
     if (recSim) recSim.endCapture();
-    try { if (venc && venc.state !== 'closed') venc.close(); } catch (_) { /* уже закрыт */ }
-    try { if (aenc && aenc.state !== 'closed') aenc.close(); } catch (_) { /* уже закрыт */ }
+    try { if (venc && venc.state !== 'closed') venc.close(); } catch (_) {}
+    try { if (aenc && aenc.state !== 'closed') aenc.close(); } catch (_) {}
     window.removeEventListener('beforeunload', onUnload);
     document.removeEventListener('visibilitychange', onRecVisibility);
     releaseWake();
